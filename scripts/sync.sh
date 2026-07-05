@@ -95,11 +95,14 @@ sync_repo() {
   rm -rf "$tmp"
 
   set_state "$name" "$sha" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # `git add` must run BEFORE the empty-check: an unstaged rsync'd tree
+  # compares empty against HEAD, so checking the index pre-add always
+  # reports "no changes" and would silently skip every repo on first run.
+  git add "${name}" "${STATE_FILE}"
   if git diff --cached --quiet HEAD -- "${name}" "${STATE_FILE}"; then
     echo "  [skip-empty] ${name}: no changes after rsync"
     return 0
   fi
-  git add "${name}" "${STATE_FILE}"
   git commit -m "sync(${name}): ${prev_display} -> ${sha:0:7}"
   return 0
 }
