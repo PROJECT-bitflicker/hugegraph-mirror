@@ -1,0 +1,806 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+    control-plane: controller-manager
+  name: hugegraph-computer-operator-system
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator-minio
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-local-storage
+  namespace: system
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-controller-manager
+  namespace: hugegraph-computer-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-leader-election-role
+  namespace: hugegraph-computer-operator-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-manager-role
+rules:
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments/status
+  verbs:
+  - get
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets/status
+  verbs:
+  - get
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs/status
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - events/status
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/status
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - services/status
+  verbs:
+  - get
+- apiGroups:
+  - extensions
+  resources:
+  - ingresses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - extensions
+  resources:
+  - ingresses/status
+  verbs:
+  - get
+- apiGroups:
+  - operator.hugegraph.apache.org
+  resources:
+  - hugegraphcomputerjobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - operator.hugegraph.apache.org
+  resources:
+  - hugegraphcomputerjobs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - operator.hugegraph.apache.org
+  resources:
+  - hugegraphcomputerjobs/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-metrics-reader
+rules:
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-proxy-role
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-leader-election-rolebinding
+  namespace: hugegraph-computer-operator-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: hugegraph-computer-operator-leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: hugegraph-computer-operator-controller-manager
+  namespace: hugegraph-computer-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hugegraph-computer-operator-manager-role
+subjects:
+- kind: ServiceAccount
+  name: hugegraph-computer-operator-controller-manager
+  namespace: hugegraph-computer-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-proxy-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hugegraph-computer-operator-proxy-role
+subjects:
+- kind: ServiceAccount
+  name: hugegraph-computer-operator-controller-manager
+  namespace: hugegraph-computer-operator-system
+---
+apiVersion: v1
+data:
+  controller_manager_config.yaml: |
+    #
+    # Licensed to the Apache Software Foundation (ASF) under one or more
+    # contributor license agreements.  See the NOTICE file distributed with
+    # this work for additional information regarding copyright ownership.
+    # The ASF licenses this file to You under the Apache License, Version 2.0
+    # (the "License"); you may not use this file except in compliance with
+    # the License.  You may obtain a copy of the License at
+    #
+    #    http://www.apache.org/licenses/LICENSE-2.0
+    #
+    # Unless required by applicable law or agreed to in writing, software
+    # distributed under the License is distributed on an "AS IS" BASIS,
+    # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    # See the License for the specific language governing permissions and
+    # limitations under the License.
+    #
+    apiVersion: controller-runtime.sigs.k8s.io/v1alpha1
+    kind: ControllerManagerConfig
+    health:
+      healthProbeBindAddress: :9892
+    metrics:
+      bindAddress: 127.0.0.1:8080
+    webhook:
+      port: 9443
+    leaderElection:
+      leaderElect: true
+      resourceName: 11f2b593.hugegraph.apache.org
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-manager-config
+  namespace: hugegraph-computer-operator-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-controller-manager-metrics-service
+  namespace: hugegraph-computer-operator-system
+spec:
+  ports:
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: https
+  selector:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+    control-plane: controller-manager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator-etcd
+    app.kubernetes.io/version: v1
+    service.app: hugegraph-computer-operator-etcd
+  name: hugegraph-computer-operator-etcd
+  namespace: hugegraph-computer-operator-system
+spec:
+  clusterIP: None
+  ports:
+  - name: client
+    port: 2379
+    protocol: TCP
+    targetPort: 2379
+  - name: peer
+    port: 2380
+    protocol: TCP
+    targetPort: 2380
+  selector:
+    app.kubernetes.io/name: hugegraph-computer-operator-etcd
+    app.kubernetes.io/version: v1
+    service.app: hugegraph-computer-operator-etcd
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator-minio
+    app.kubernetes.io/version: v1
+    service.app: hugegraph-computer-operator-minio
+  name: hugegraph-computer-operator-minio
+  namespace: hugegraph-computer-operator-system
+spec:
+  clusterIP: None
+  ports:
+  - name: client
+    port: 9000
+    protocol: TCP
+    targetPort: 9090
+  selector:
+    app.kubernetes.io/name: hugegraph-computer-operator-minio
+    app.kubernetes.io/version: v1
+    service.app: hugegraph-computer-operator-minio
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hugegraph-computer-operator-webhook-service
+  namespace: hugegraph-computer-operator-system
+spec:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+  selector:
+    control-plane: controller-manager
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator
+    app.kubernetes.io/version: v1
+    control-plane: controller-manager
+  name: hugegraph-computer-operator-controller-manager
+  namespace: hugegraph-computer-operator-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hugegraph-computer-operator
+      app.kubernetes.io/version: v1
+      control-plane: controller-manager
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        app.kubernetes.io/name: hugegraph-computer-operator
+        app.kubernetes.io/version: v1
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --leader-elect
+        command:
+        - /manager
+        image: hugegraph/hugegraph-computer-operator-manager:latest
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9892
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        ports:
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 9892
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 10m
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: cert
+          readOnly: true
+      - args: []
+        command:
+        - java
+        - -jar
+        - hugegraph-computer-operator.jar
+        env:
+        - name: PROBE_PORT
+          value: "9892"
+        - name: WATCH_NAMESPACE
+          value: hugegraph-computer-operator-system
+        - name: RECONCILER_COUNT
+          value: "6"
+        - name: INTERNAL_ETCD_URL
+          value: http://hugegraph-computer-operator-etcd.hugegraph-computer-operator-system:2379
+        - name: INTERNAL_MINIO_URL
+          value: http://hugegraph-computer-operator-minio.hugegraph-computer-operator-system:9000
+        - name: LOG_LEVEL
+          value: INFO
+        - name: AUTO_DESTROY_POD
+          value: "true"
+        image: hugegraph/hugegraph-computer-operator:latest
+        imagePullPolicy: Always
+        name: controller
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      serviceAccountName: hugegraph-computer-operator-controller-manager
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: cert
+        secret:
+          defaultMode: 420
+          secretName: webhook-server-cert
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator-etcd
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-etcd
+  namespace: hugegraph-computer-operator-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hugegraph-computer-operator-etcd
+      app.kubernetes.io/version: v1
+      service.app: hugegraph-computer-operator-etcd
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hugegraph-computer-operator-etcd
+        app.kubernetes.io/version: v1
+        service.app: hugegraph-computer-operator-etcd
+    spec:
+      containers:
+      - command:
+        - /bin/sh
+        - -ec
+        - |
+          HOSTNAME=$(hostname)
+          etcd --name ${HOSTNAME} \
+          --data-dir /var/etcd/data \
+          --initial-advertise-peer-urls http://${HOSTNAME}.hugegraph-computer-operator-etcd.hugegraph-computer-operator-system:2380 \
+          --listen-peer-urls http://0.0.0.0:2380 \
+          --listen-client-urls http://0.0.0.0:2379 \
+          --advertise-client-urls http://${HOSTNAME}.hugegraph-computer-operator-etcd.hugegraph-computer-operator-system:2379 \
+          --initial-cluster ${HOSTNAME}=http://${HOSTNAME}.hugegraph-computer-operator-etcd.hugegraph-computer-operator-system:2380 \
+          --initial-cluster-state new
+        image: quay.io/coreos/etcd:v3.5.0
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -ec
+            - ETCDCTL_API=3 etcdctl endpoint status
+          failureThreshold: 3
+          initialDelaySeconds: 10
+          periodSeconds: 60
+          successThreshold: 1
+          timeoutSeconds: 10
+        name: hugegraph-computer-operator-etcd
+        ports:
+        - containerPort: 2379
+          name: client
+        - containerPort: 2380
+          name: peer
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -ec
+            - ETCDCTL_API=3 etcdctl endpoint status
+          failureThreshold: 3
+          initialDelaySeconds: 1
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 5
+      hostname: hugegraph-computer-operator-etcd-0
+      subdomain: hugegraph-computer-operator-etcd
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: hugegraph-computer-operator-minio
+    app.kubernetes.io/version: v1
+  name: hugegraph-computer-operator-minio
+  namespace: hugegraph-computer-operator-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hugegraph-computer-operator-minio
+      app.kubernetes.io/version: v1
+      service.app: hugegraph-computer-operator-minio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hugegraph-computer-operator-minio
+        app.kubernetes.io/version: v1
+        service.app: hugegraph-computer-operator-minio
+    spec:
+      containers:
+      - args:
+        - minio server /data --console-address :9090
+        command:
+        - /bin/bash
+        - -c
+        env:
+        - name: MINIO_ACCESS_KEY
+          value: minioadmin
+        - name: MINIO_SECRET_KEY
+          value: minioadmin
+        image: quay.io/minio/minio:RELEASE.2023-10-16T04-13-43Z
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+            scheme: HTTP
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          successThreshold: 1
+          timeoutSeconds: 10
+        name: hugegraph-computer-operator-minio
+        ports:
+        - containerPort: 9090
+          name: client
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+            scheme: HTTP
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          successThreshold: 1
+          timeoutSeconds: 10
+        volumeMounts:
+        - mountPath: /data
+          name: localvolume
+      hostname: hugegraph-computer-operator-minio-0
+      subdomain: hugegraph-computer-operator-minio
+      volumes:
+      - hostPath:
+          path: /mnt/disk1/data
+          type: DirectoryOrCreate
+        name: localvolume
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hugegraph-computer-operator-serving-cert
+  namespace: hugegraph-computer-operator-system
+spec:
+  dnsNames:
+  - hugegraph-computer-operator-webhook-service.hugegraph-computer-operator-system.svc
+  - hugegraph-computer-operator-webhook-service.hugegraph-computer-operator-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: hugegraph-computer-operator-selfsigned-issuer
+  secretName: webhook-server-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: hugegraph-computer-operator-selfsigned-issuer
+  namespace: hugegraph-computer-operator-system
+spec:
+  selfSigned: {}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: hugegraph-computer-operator-system/hugegraph-computer-operator-serving-cert
+  name: hugegraph-computer-operator-mutating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: hugegraph-computer-operator-webhook-service
+      namespace: hugegraph-computer-operator-system
+      path: /mutate-operator-hugegraph-apache-org-v1-hugegraphcomputerjob
+  failurePolicy: Fail
+  name: mhugegraphcomputerjob.kb.io
+  rules:
+  - apiGroups:
+    - operator.hugegraph.apache.org
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - hugegraphcomputerjobs
+  sideEffects: None
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: hugegraph-computer-operator-system/hugegraph-computer-operator-serving-cert
+  name: hugegraph-computer-operator-validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: hugegraph-computer-operator-webhook-service
+      namespace: hugegraph-computer-operator-system
+      path: /validate-operator-hugegraph-apache-org-v1-hugegraphcomputerjob
+  failurePolicy: Fail
+  name: vhugegraphcomputerjob.kb.io
+  rules:
+  - apiGroups:
+    - operator.hugegraph.apache.org
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - hugegraphcomputerjobs
+  sideEffects: None

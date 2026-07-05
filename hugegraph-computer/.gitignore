@@ -1,0 +1,93 @@
+target/
+**.db
+logs/
+node_modules
+upload-files/
+demo*
+gen-java
+*.class
+**/dependency-reduced-pom.xml
+dist.sh
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+.svn
+
+### IntelliJ IDEA ###
+.idea
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
+build/
+
+### VS Code ###
+.vscode/
+
+# misc
+.DS_Store
+*/.DS_Store
+**/*.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+*.orig
+*.rej
+**/.keep
+*.sdf
+*.suo
+*.vcxproj.user
+*.swp
+*.log
+*.pyc
+
+# AI assistant specific files (we only maintain AGENTS.md)
+CLAUDE.md
+GEMINI.md
+CURSOR.md
+COPILOT.md
+.cursorrules
+.cursor/
+.github/copilot-instructions.md
+
+# maven ignore
+
+apache-hugegraph-*/
+*.war
+*.zip
+*.tar
+*.tar.gz*
+tree.txt
+*.versionsBackup
+*.flattened-pom.xml
+
+# eclipse ignore
+.settings/
+
+# temp ignore
+*.cache
+*.diff
+*.patch
+*.tmp
+
+# system ignore
+Thumbs.db
+hs_err_pid*
+# mobile Tools for Java (J2ME)
+.mtj.tmp/
+# blueJ files
+*.ctxt
