@@ -1,0 +1,189 @@
+# Proper format is "TestClass.testMethodName: ignore reason"
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+####################    structure suite    ####################
+
+## automatic ID for edges
+org.apache.tinkerpop.gremlin.structure.util.detached.DetachedEdgeTest.shouldNotEvaluateToEqualDifferentId: Not support automatic/custom id for edge
+org.apache.tinkerpop.gremlin.structure.util.reference.ReferenceEdgeTest.shouldNotEvaluateToEqualDifferentId: Not support automatic/custom id for edge
+org.apache.tinkerpop.gremlin.structure.EdgeTest.BasicEdgeTest.shouldValidateIdEquality: Not support automatic/custom id for edge
+org.apache.tinkerpop.gremlin.structure.EdgeTest.BasicEdgeTest.shouldValidateEquality: Not support automatic/custom id for edge
+
+## property ID
+org.apache.tinkerpop.gremlin.structure.util.detached.DetachedPropertyTest.shouldNotBeEqualPropertiesAsThereIsDifferentKey: Not support property id
+
+## id should be String type
+org.apache.tinkerpop.gremlin.structure.GraphTest.shouldAddVertexWithUserSuppliedStringId: expect vertex.id is String type
+
+## same id for element
+org.apache.tinkerpop.gremlin.structure.GraphTest.shouldHaveExceptionConsistencyWhenAssigningSameIdOnVertex: Assigning the same ID to an Element is accepted(override), but tinkerpop expect throw an exception
+
+## uniform list
+org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnVertexOnAdd[supportsUniformListValues([100, 200, 300])]: Not support uniform of Integer because define uniform as String list
+org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnEdgeOnAdd[supportsUniformListValues([100, 200, 300])]: Not support uniform of Integer because define uniform as String list
+org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnVertex[supportsUniformListValues([100, 200, 300])]: Not support uniform of Integer because define uniform as String list
+org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnEdge[supportsUniformListValues([100, 200, 300])]: Not support uniform of Integer because define uniform as String list
+org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnVertexOnAdd[supportsUniformListValues([try1, try2])]: Uniform list can't be accessed by vertex.property() which is supposed right by tinkerpop
+org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnVertex[supportsUniformListValues([try1, try2])]: Uniform list can't be accessed by vertex.property() which is supposed right by tinkerpop
+
+# expect multi properties after setting single property multi times
+org.apache.tinkerpop.gremlin.structure.GraphTest.shouldOverwriteEarlierKeyValuesWithLaterKeyValuesOnAddVertexIfMultiProperty: Expect multi properties after setting single property multi times
+org.apache.tinkerpop.gremlin.structure.VertexPropertyTest.VertexPropertyRemoval.shouldRemoveMultiProperties: Expect multi properties after setting single property multi times
+org.apache.tinkerpop.gremlin.structure.VertexPropertyTest.VertexPropertyRemoval.shouldRemoveMultiPropertiesWhenVerticesAreRemoved: Expect multi properties after setting single property multi times
+org.apache.tinkerpop.gremlin.structure.VertexPropertyTest.VertexPropertyAddition.shouldAllowIdenticalValuedMultiProperties: Expect multi properties after setting single property multi times
+
+# not support nested property
+org.apache.tinkerpop.gremlin.structure.VertexPropertyTest.VertexPropertyRemoval.shouldAllowIteratingAndRemovingVertexPropertyProperties: Not support nested property
+
+## failed tests with wrong edge number, reason: replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.ProcessorTest.shouldProcessEdges: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateSameGraph[test(NormalDistribution{stdDeviation=2.0, mean=0.0},NormalDistribution{stdDeviation=2.0, mean=0.0})]: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateDifferentGraph[test(NormalDistribution{stdDeviation=2.0, mean=0.0},NormalDistribution{stdDeviation=2.0, mean=0.0})]: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateSameGraph[test(NormalDistribution{stdDeviation=2.0, mean=0.0},NormalDistribution{stdDeviation=5.0, mean=0.0})]: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateDifferentGraph[test(NormalDistribution{stdDeviation=2.0, mean=0.0},NormalDistribution{stdDeviation=5.0, mean=0.0})]: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateSameGraph[test(PowerLawDistribution{gamma=2.1, multiplier=0.0},PowerLawDistribution{gamma=2.1, multiplier=0.0})]: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateDifferentGraph[test(PowerLawDistribution{gamma=2.1, multiplier=0.0},PowerLawDistribution{gamma=2.1, multiplier=0.0})]: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateSameGraph[test(PowerLawDistribution{gamma=2.9, multiplier=0.0},PowerLawDistribution{gamma=2.9, multiplier=0.0})]: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateDifferentGraph[test(PowerLawDistribution{gamma=2.9, multiplier=0.0},PowerLawDistribution{gamma=2.9, multiplier=0.0})]: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateSameGraph[test(PowerLawDistribution{gamma=3.9, multiplier=0.0},PowerLawDistribution{gamma=3.9, multiplier=0.0})]: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateDifferentGraph[test(PowerLawDistribution{gamma=3.9, multiplier=0.0},PowerLawDistribution{gamma=3.9, multiplier=0.0})]: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateSameGraph[test(PowerLawDistribution{gamma=2.3, multiplier=0.0},PowerLawDistribution{gamma=2.8, multiplier=0.0})]: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateDifferentGraph[test(PowerLawDistribution{gamma=2.3, multiplier=0.0},PowerLawDistribution{gamma=2.8, multiplier=0.0})]: Replicated edges treated as one
+
+## user supplied numeric id
+org.apache.tinkerpop.gremlin.structure.FeatureSupportTest.VertexFunctionalityTest.shouldSupportUserSuppliedIdsOfTypeNumericLong: Not open the feature 'support user supplied id of numeric long' although numeric long id is allowed
+org.apache.tinkerpop.gremlin.structure.FeatureSupportTest.VertexFunctionalityTest.shouldSupportUserSuppliedIdsOfTypeNumericInt: Not open the feature 'support user supplied id of numeric long' although numeric long id is allowed
+
+## user supplied uuid id
+org.apache.tinkerpop.gremlin.structure.FeatureSupportTest.VertexFunctionalityTest.shouldSupportUserSuppliedIdsOfTypeUuid: Not open the feature 'support user supplied id of uuid' although uuid id is allowed
+
+## edge id format validate firstly and throw NotFoundException if invalid
+org.apache.tinkerpop.gremlin.structure.GraphTest.shouldHaveExceptionConsistencyWhenFindEdgeByIdThatIsNonExistentViaIterator: Invalid format of edge id will introduce throwing NotFoundException before try to query in backend store
+
+## not bugs
+org.apache.tinkerpop.gremlin.structure.GraphTest.shouldRemoveVertices: Random UUID as edge label
+org.apache.tinkerpop.gremlin.structure.GraphTest.shouldRemoveEdges: Random UUID as edge label
+org.apache.tinkerpop.gremlin.structure.TransactionTest.shouldExecuteWithCompetingThreads: Hang the tests because property 'test' have both String and long value
+
+## vertex properties doesn't have nested structures with HugeVertexSerializer
+org.apache.tinkerpop.gremlin.structure.SerializationTest.GraphSONTest.shouldSerializeVertex: Vertex properties doesn't have nested structures with HugeVertexSerializer
+org.apache.tinkerpop.gremlin.structure.SerializationTest.GraphSONTest.shouldSerializePath: Vertex properties doesn't have nested structures with HugeVertexSerializer
+org.apache.tinkerpop.gremlin.structure.SerializationTest.GraphSONTest.shouldSerializeTree: Vertex properties doesn't have nested structures with HugeVertexSerializer
+
+## update property but no commit, lead there are changes in indexTx, can't do index query
+org.apache.tinkerpop.gremlin.structure.util.detached.DetachedEdgeTest.shouldConstructDetachedEdge: Can't do index query when there are changes in transaction
+org.apache.tinkerpop.gremlin.structure.util.detached.DetachedEdgeTest.shouldConstructDetachedEdgeAsReference: Can't do index query when there are changes in transaction
+org.apache.tinkerpop.gremlin.structure.util.reference.ReferenceEdgeTest.shouldConstructReferenceEdge: Can't do index query when there are changes in transaction
+
+####################    process suite    ####################
+
+# unsupported automatic edge id, therefore number of edge is wrong
+org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.EventStrategyProcessTest.shouldTriggerAddEdge: Unsupported automatic edge id, therefore number of edge is wrong
+org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.EventStrategyProcessTest.shouldTriggerAddEdgeByPath: Unsupported automatic edge id, therefore number of edge is wrong
+# shouldWriteToMultiplePartitions
+org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.PartitionStrategyProcessTest.shouldWriteToMultiplePartitions: It's not allowed to query by index when there are uncommitted records
+org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.PartitionStrategyProcessTest.shouldWriteVerticesToMultiplePartitions: It's not allowed to query by index when there are uncommitted records
+
+# assert error, long time, reason: replicated edges treated as one
+org.apache.tinkerpop.gremlin.process.traversal.step.map.CountTest.Traversals.g_V_both_both_count: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.process.traversal.step.map.CountTest.Traversals.g_V_repeatXoutX_timesX3X_count: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.process.traversal.step.map.CountTest.Traversals.g_V_repeatXoutX_timesX8X_count: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.process.traversal.step.map.ProfileTest.Traversals.grateful_V_out_out_profileXmetricsX: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.process.traversal.step.map.ProfileTest.Traversals.grateful_V_out_out_profile: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupTest.Traversals.g_V_repeatXbothXfollowedByXX_timesX2X_group_byXsongTypeX_byXcountX: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupTest.Traversals.g_V_repeatXbothXfollowedByXX_timesX2X_groupXaX_byXsongTypeX_byXcountX_capXaX: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupTestV3d0.Traversals.g_V_repeatXbothXfollowedByXX_timesX2X_group_byXsongTypeX_byXcountX: Replicated edges treated as one
+org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupTestV3d0.Traversals.g_V_repeatXbothXfollowedByXX_timesX2X_groupXaX_byXsongTypeX_byXcountX_capXaX: Replicated edges treated as one
+
+# can't solve, but not bug
+org.apache.tinkerpop.gremlin.process.traversal.step.map.AddEdgeTest.Traversals.g_V_aggregateXxX_asXaX_selectXxX_unfold_addEXexistsWithX_toXaX_propertyXtime_nowX: Using edge label 'existWith' connect all vertices
+
+# expect multi properties after setting single property multi times
+org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexTest.Traversals.g_addVXpersonX_propertyXname_stephenX_propertyXname_stephenmX: Expect multi properties after setting single property multi times
+org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexTest.Traversals.g_addVXanimalX_propertyXname_mateoX_propertyXname_gateoX_propertyXname_cateoX_propertyXage_5X: Expect multi properties after setting single property multi times
+org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexTest.Traversals.g_V_addVXanimalX_propertyXname_valuesXnameXX_propertyXname_an_animalX_propertyXvaluesXnameX_labelX: Expect multi properties after setting single property multi times
+
+# pass, long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.CountTest.Traversals.g_V_repeatXoutX_timesX5X_asXaX_outXwrittenByX_asXbX_selectXa_bX_count: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.CountMatchTraversals.g_V_matchXa_followedBy_count_isXgtX10XX_b__a_0followedBy_count_isXgtX10XX_bX_count: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.CountMatchTraversals.g_V_hasLabelXsongsX_matchXa_name_b__a_performances_cX_selectXb_cX_count: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.CountMatchTraversals.g_V_matchXa_0sungBy_b__a_0sungBy_c__b_writtenBy_d__c_writtenBy_e__d_hasXname_George_HarisonX__e_hasXname_Bob_MarleyXX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.CountMatchTraversals.g_V_matchXa_0sungBy_b__a_0writtenBy_c__b_writtenBy_dX_whereXc_sungBy_dX_whereXd_hasXname_GarciaXX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.CountMatchTraversals.g_V_matchXa_0sungBy_b__a_0writtenBy_c__b_writtenBy_d__c_sungBy_d__d_hasXname_GarciaXX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.GreedyMatchTraversals.g_V_matchXa_followedBy_count_isXgtX10XX_b__a_0followedBy_count_isXgtX10XX_bX_count: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.GreedyMatchTraversals.g_V_hasLabelXsongsX_matchXa_name_b__a_performances_cX_selectXb_cX_count: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.GreedyMatchTraversals.g_V_matchXa_0sungBy_b__a_0sungBy_c__b_writtenBy_d__c_writtenBy_e__d_hasXname_George_HarisonX__e_hasXname_Bob_MarleyXX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.GreedyMatchTraversals.g_V_matchXa_0sungBy_b__a_0writtenBy_c__b_writtenBy_dX_whereXc_sungBy_dX_whereXd_hasXname_GarciaXX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.OrderTest.Traversals.g_V_hasLabelXsongX_order_byXperfomances_decrX_byXnameX_rangeX110_120X_name: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupTest.Traversals.g_V_hasLabelXsongX_group_byXnameX_byXproperties_groupCount_byXlabelXX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupTest.Traversals.g_V_outXfollowedByX_group_byXsongTypeX_byXbothE_group_byXlabelX_byXweight_sumXX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupTest.Traversals.g_V_hasLabelXsongX_groupXaX_byXnameX_byXproperties_groupCount_byXlabelXX_out_capXaX: long time
+org.apache.tinkerpop.gremlin.process.traversal.TraversalInterruptionTest.shouldRespectThreadInterruptionInVertexStep[expectInterruption(g_V)]: long time
+org.apache.tinkerpop.gremlin.process.traversal.TraversalInterruptionTest.shouldRespectThreadInterruptionInVertexStep[expectInterruption(g_V_out)]: long time
+org.apache.tinkerpop.gremlin.process.traversal.TraversalInterruptionTest.shouldRespectThreadInterruptionInVertexStep[expectInterruption(g_V_outE)]: long time
+org.apache.tinkerpop.gremlin.process.traversal.TraversalInterruptionTest.shouldRespectThreadInterruptionInVertexStep[expectInterruption(g_V_in)]: long time
+org.apache.tinkerpop.gremlin.process.traversal.TraversalInterruptionTest.shouldRespectThreadInterruptionInVertexStep[expectInterruption(g_V_inE)]: long time(7 min)
+org.apache.tinkerpop.gremlin.process.traversal.TraversalInterruptionTest.shouldRespectThreadInterruptionInVertexStep[expectInterruption(g_V_properties)]: long time
+org.apache.tinkerpop.gremlin.process.traversal.TraversalInterruptionTest.shouldRespectThreadInterruptionInVertexStep[expectInterruption(g_E)]: long time
+org.apache.tinkerpop.gremlin.process.traversal.TraversalInterruptionTest.shouldRespectThreadInterruptionInVertexStep[expectInterruption(g_E_outV)]: long time
+org.apache.tinkerpop.gremlin.process.traversal.TraversalInterruptionTest.shouldRespectThreadInterruptionInVertexStep[expectInterruption(g_E_inV)]: long time
+org.apache.tinkerpop.gremlin.process.traversal.TraversalInterruptionTest.shouldRespectThreadInterruptionInVertexStep[expectInterruption(g_E_properties)]: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphTest.Traversals.g_V_hasXname_GarciaX_inXsungByX_asXsongX_V_hasXname_Willie_DixonX_inXwrittenByX_whereXeqXsongXX_name: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.CountMatchTraversals.g_V_matchXa_hasXname_GarciaX__a_0writtenBy_b__a_0sungBy_bX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.CountMatchTraversals.g_V_matchXa_hasXname_GarciaX__a_0writtenBy_b__b_followedBy_c__c_writtenBy_d__whereXd_neqXaXXX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.GreedyMatchTraversals.g_V_matchXa_hasXname_GarciaX__a_0writtenBy_b__a_0sungBy_bX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.GreedyMatchTraversals.g_V_matchXa_hasXname_GarciaX__a_0writtenBy_b__b_followedBy_c__c_writtenBy_d__whereXd_neqXaXXX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchTest.GreedyMatchTraversals.g_V_matchXa_0sungBy_b__a_0writtenBy_c__b_writtenBy_d__c_sungBy_d__d_hasXname_GarciaXX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.map.OrderTest.Traversals.g_V_hasXsong_name_OHBOYX_outXfollowedByX_outXfollowedByX_order_byXperformancesX_byXsongType_incrX: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.ComplexTest.Traversals.classicRecommendation: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.ComplexTest.Traversals.playlistPaths: long time
+org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.TreeTest.Traversals.g_V_out_out_treeXaX_capXaX: long time
+
+# Unsupported query
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasIdXwithoutXemptyXX_count: Unsupported query 'NOT IN []'
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasIdXemptyX_count: Unsupported query 'hasId(EmptyList)'
+
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_containingXarkXX: Unsupported predicate 'containing(ark)'
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_endingWithXasXX: Unsupported predicate 'endingWith(as)'
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_startingWithXmarXX: Unsupported predicate 'startingWith(mar)'
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXage_withoutX27X_count: Unsupported relation 'NEQ'
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXperson_name_containingXoX_andXltXmXXX: Unsupported predicate 'containing(o)'
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_not_startingWithXmarXX: Unsupported predicate 'notStartingWith(mar)'
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_not_containingXarkXX: Unsupported predicate 'notContaining(ark)'
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_not_endingWithXasXX: Unsupported predicate 'notEndingWith(as)'
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXage_withoutX27_29X_count: Unsupported relation 'NEQ'
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_gtXmX_andXcontainingXoXXX: Unsupported predicate 'containing(o)'
+org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXp_neqXvXX: Don't accept query based on properties [p] that are not indexed in any label, may not match not-equal condition
+
+# Unsupport edge label 'created': 'software' -> 'person', has existed an edgelabel (created: person -> software) in this case
+org.apache.tinkerpop.gremlin.process.traversal.step.map.AddEdgeTest.Traversals.g_V_hasXname_markoX_asXaX_outEXcreatedX_asXbX_inV_addEXselectXbX_labelX_toXaX: Unsupport edge from inV to outV
+
+# Can't customize vertex id when id strategy is 'AUTOMATIC': Firstly add vertex without id(id strategy is 'AUTOMATIC'), then write it into file, at last read file, call add vertex with id
+org.apache.tinkerpop.gremlin.process.traversal.step.map.ReadTest.Traversals.g_io_read_withXreader_graphmlX: Can't customize vertex id when id strategy is 'AUTOMATIC'
+org.apache.tinkerpop.gremlin.process.traversal.step.map.ReadTest.Traversals.g_io_readXxmlX: Can't customize vertex id when id strategy is 'AUTOMATIC'
+
+####################    structure performance suite    ####################
+
+org.apache.tinkerpop.gremlin.structure.GraphWritePerformanceTest.WriteToGraph.writeEmptyVertices: Vertices number exceeds 65536, can not delete by vertex label after tests
+org.apache.tinkerpop.gremlin.structure.GraphWritePerformanceTest.WriteToGraph.writeEmptyVerticesAndEdges: Vertices number exceeds 65536, can not delete by vertex label after tests
+org.apache.tinkerpop.gremlin.structure.GraphReadPerformanceTest.ReadFromGraph.readAllVerticesAndProperties: Vertices number exceeds 65536, can not delete by vertex label after tests
+org.apache.tinkerpop.gremlin.structure.GraphReadPerformanceTest.ReadFromGraph.readAllEdgesAndProperties: Vertices number exceeds 65536, can not delete by vertex label after tests
+
+####################    process performance suite    ####################
+
+org.apache.tinkerpop.gremlin.process.TraversalPerformanceTest.g_E_hasLabelXwrittenByX_whereXinV_inEXsungByX_count_isX0XX_subgraphXsgX: Failed with vertex not exist error after 15 minutes, need more analysis to fix

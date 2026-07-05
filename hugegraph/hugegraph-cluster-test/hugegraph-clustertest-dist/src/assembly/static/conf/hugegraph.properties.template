@@ -1,0 +1,72 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# gremlin entrance to create graph
+gremlin.graph=org.apache.hugegraph.auth.HugeFactoryAuthProxy
+
+# cache config
+#schema.cache_capacity=100000
+# vertex-cache default is 1000w, 10min expired
+vertex.cache_type=l2
+#vertex.cache_capacity=10000000
+#vertex.cache_expire=600
+# edge-cache default is 100w, 10min expired
+edge.cache_type=l2
+#edge.cache_capacity=1000000
+#edge.cache_expire=600
+
+
+# schema illegal name template
+#schema.illegal_name_regex=\s+|~.*
+
+#vertex.default_label=vertex
+
+backend=hstore
+serializer=binary
+
+# graph name
+store=hugegraph
+
+# pd config
+pd.peers=$PD_PEERS_LIST$
+
+# task config
+task.scheduler_type=local
+task.schedule_period=10
+task.retry=0
+task.wait_timeout=10
+
+# search config
+search.text_analyzer=jieba
+search.text_analyzer_mode=INDEX
+
+### RocksDB backend config
+#rocksdb.data_path=/path/to/disk
+#rocksdb.wal_path=/path/to/disk
+
+
+### HBase backend config
+#hbase.hosts=localhost
+#hbase.port=2181
+#hbase.znode_parent=/hbase
+#hbase.threads_max=64
+# IMPORTANT: recommend to modify the HBase partition number
+#            by the actual/env data amount & RS amount before init store
+#            It will influence the load speed a lot
+#hbase.enable_partition=true
+#hbase.vertex_partitions=10
+#hbase.edge_partitions=30
