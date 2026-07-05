@@ -1,0 +1,38 @@
+name: sync-hugegraph-ecosystem
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # hourly. Cheap: unless a repo actually changed,
+                           # each run is just 2 tiny API calls per repo —
+                           # no clone happens unless a SHA moved.
+  workflow_dispatch: {}    # hit this manually right before a DeepWiki index
+  push:
+    paths:
+      - ".github/workflows/sync.yml"
+      - "scripts/sync.sh"
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run sync
+        shell: bash
+        run: bash scripts/sync.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        shell: bash
+        # scripts/sync.sh already commits per-repo inside its own loop, so by
+        # this point the working tree is clean and HEAD is either unchanged
+        # (nothing to push -- `git push` just reports "up to date") or ahead
+        # by N commits. No need to duplicate commit logic here.
+        run: |
+          git config user.name "hugegraph-mirror-bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git push

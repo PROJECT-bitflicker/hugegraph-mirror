@@ -1,0 +1,12 @@
+This repository mirrors the working trees of the following Apache
+HugeGraph projects, each licensed under the Apache License 2.0:
+
+  - apache/hugegraph
+  - apache/hugegraph-ai
+  - apache/hugegraph-computer
+  - apache/hugegraph-toolchain
+  - apache/hugegraph-doc
+
+Each subdirectory's own LICENSE/NOTICE file is carried over unmodified
+as part of the sync. This mirror is maintained for internal indexing
+and search purposes only.
