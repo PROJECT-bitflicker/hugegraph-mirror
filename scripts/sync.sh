@@ -95,14 +95,25 @@ sync_repo() {
   rm -rf "$tmp"
 
   set_state "$name" "$sha" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  git add "${name}" "${STATE_FILE}" 2>/dev/null || true
-  git commit -m "sync(${name}): ${prev_display} -> ${sha:0:7}" --quiet 2>/dev/null || true
+  if git diff --cached --quiet HEAD -- "${name}" "${STATE_FILE}"; then
+    echo "  [skip-empty] ${name}: no changes after rsync"
+    return 0
+  fi
+  git add "${name}" "${STATE_FILE}"
+  git commit -m "sync(${name}): ${prev_display} -> ${sha:0:7}"
   return 0
 }
 
 main() {
   mkdir -p "$(dirname "$STATE_FILE")"
   [[ -f "$STATE_FILE" ]] || echo '{"last_sync": null, "upstreams": {}}' > "$STATE_FILE"
+
+  # GitHub Actions runners ship with no global user.name/email, and the
+  # previous version of this script swallowed commit failures with
+  # `|| true`, which let the bug ship silently. Set identity up front and
+  # let any commit failure abort the whole run so we see it in CI logs.
+  git config user.name  "${GIT_AUTHOR_NAME:-hugegraph-mirror-bot}"
+  git config user.email "${GIT_AUTHOR_EMAIL:-github-actions[bot]@users.noreply.github.com}"
 
   local failed=()
   for name in "${REPOS[@]}"; do
