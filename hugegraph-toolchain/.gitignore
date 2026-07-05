@@ -1,0 +1,128 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**
+!**/src/test/**
+**.db
+logs/
+ui
+node_modules/
+upload-files/
+demo*
+gen-java
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+.svn
+
+### IntelliJ IDEA ###
+.idea/*
+!.idea/vcs.xml
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
+dist/
+build/
+
+### VS Code ###
+.vscode/
+/hubble-fe/.history/
+
+# dependencies
+/hubble-fe/node_modules
+/hubble-fe/.pnp
+.pnp.js
+/hugegraph-hubble/hubble-fe/node/node
+
+# testingå
+/hubble-fe/coverage
+
+# production
+/hubble-fe/build
+
+# misc
+.DS_Store
+*/.DS_Store
+**/*.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+*.orig
+*.rej
+**/.keep
+*.sdf
+*.suo
+*.vcxproj.user
+*.swp
+*.log
+*.pyc
+
+# maven ignore
+apache-hugegraph-*-incubating-*/
+output/
+*.war
+*.zip
+*.tar
+*.tar.gz*
+tree.txt
+*.versionsBackup
+.flattened-pom.xml
+*.truststore
+
+# eclipse ignore
+.settings/
+
+# temp ignore
+*.cache
+*.diff
+*.patch
+*.tmp
+
+# system ignore
+Thumbs.db
+
+# client-go
+go.env
+
+# AI-IDE prompt files (We only keep AGENTS.md, other files could soft-linked it when needed)
+# Claude Projects
+CLAUDE.md
+CLAUDE_*.md
+# Gemini/Google
+GEMINI.md
+# GitHub Copilot / Microsoft
+copilot-instructions.md
+.copilot-instructions.md
+# Cursor IDE
+cursor-instructions.md
+.cursor-instructions.md
+cursor.md
+# Windsurf/Codeium
+windsurf.md
+windsurf-instructions.md
+codeium.md
+codeium-instructions.md
+# Other AI coding assistants
+.ai-instructions.md
+*.ai-prompt.md
+WARP.md
+
+

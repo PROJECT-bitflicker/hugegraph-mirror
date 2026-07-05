@@ -1,0 +1,57 @@
+# TODO: this action can't used in apache org, try replace it
+name: release-package
+
+on:
+  release:
+    types: [ published ]
+
+jobs:
+  release:
+    runs-on: ubuntu-20.04
+    env:
+      STATIC_DIR: assembly/static
+    steps:
+      - name: Fetch Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install JDK 8
+        uses: actions/setup-java@v3
+        with:
+          java-version: '8'
+          distribution: 'zulu'
+
+      - name: Cache Maven packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Package
+        run: |
+          mvn clean package -DskipTests
+
+      - uses: xresloader/upload-to-github-release@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: "hugegraph-*.tar.gz"
+          tag_name: ${{ github.ref_name }}
+          overwrite: true
+          draft: false
+          verbose: true
+          update_latest_release: true
+
+      - name: Release Maven package
+        uses: samuelmeuli/action-maven-publish@v1
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg_passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          nexus_username: ${{ secrets.NEXUS_USERNAME }}
+          nexus_password: ${{ secrets.NEXUS_PASSWORD }}
+          server_id: sonatype-nexus-staging
+          maven_profiles: "release"
+          maven_args: >
+            -Dmaven.test.skip=true

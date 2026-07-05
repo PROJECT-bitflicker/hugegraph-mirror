@@ -1,0 +1,20 @@
+{
+  "vertices": [
+    {
+      "label": "person",
+      "input": {
+        "type": "${source_type}",
+        "path": "${store_path}/vertex_person.csv",
+        "format": "CSV",
+        "header": ["name", "age", "city"],
+        "charset": "UTF-8"
+      },
+      "value_mapping": {
+        "name": {
+          "1": "marko",
+          "2": "vadas"
+        }
+      }
+    }
+  ]
+}

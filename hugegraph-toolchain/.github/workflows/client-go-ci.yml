@@ -1,0 +1,66 @@
+name: "go-client-ci"
+
+on:
+  push:
+    branches:
+      - master
+      - /^release-.*$/
+    paths:
+      - hugegraph-client-go/**
+      - hugegraph-dist/**
+      - .github/workflows/**
+      - pom.xml
+  pull_request:
+    paths:
+      - hugegraph-client-go/**
+      - hugegraph-dist/**
+      - .github/workflows/**
+      - pom.xml
+
+jobs:
+  client-go-ci:
+    runs-on: ubuntu-latest
+    env:
+      USE_STAGE: 'true' # Whether to include the stage repository.
+      TRAVIS_DIR: hugegraph-client/assembly/travis
+    strategy:
+      fail-fast: false
+      matrix:
+        JAVA_VERSION: ['11']
+
+    steps:
+      - name: Fetch Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get HugeGraph stable commit id
+        id: get-commit
+        uses: ./.github/actions/get-hugegraph-commit
+
+      - name: Setup Java environment
+        uses: ./.github/actions/setup-java-env
+        with:
+          java-version: ${{ matrix.JAVA_VERSION }}
+          distribution: 'zulu'
+          use-stage: ${{ env.USE_STAGE }}
+
+      - name: Setup HugeGraph server
+        uses: ./.github/actions/setup-hugegraph-server
+        with:
+          travis-dir: ${{ env.TRAVIS_DIR }}
+          commit-id: ${{ steps.get-commit.outputs.commit_id }}
+
+      - name: Init Go env
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.x'
+
+      - name: Go test
+        run: |
+          go version
+          sudo swapoff -a
+          sudo sysctl -w vm.swappiness=1
+          sudo sysctl -w fs.file-max=262144
+          sudo sysctl -w vm.max_map_count=262144
+          cd hugegraph-client-go && make test

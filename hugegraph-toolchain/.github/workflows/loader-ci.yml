@@ -1,0 +1,97 @@
+name: "loader-ci"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - /^release-.*$/
+    paths:
+      - hugegraph-loader/**
+      - hugegraph-dist/**
+      - .github/workflows/**
+      - pom.xml
+  pull_request:
+    paths:
+      - hugegraph-loader/**
+      - hugegraph-dist/**
+      - hugegraph-client/**
+      - .github/workflows/**
+      - pom.xml
+
+jobs:
+  loader-ci:
+    runs-on: ubuntu-latest
+    env:
+      USE_STAGE: 'true' # Whether to include the stage repository.
+      TRAVIS_DIR: hugegraph-loader/assembly/travis
+      STATIC_DIR: hugegraph-loader/assembly/static
+      DB_USER: root
+      DB_PASS: root
+      DB_DATABASE: load_test
+    strategy:
+      matrix:
+        JAVA_VERSION: ['11']
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - name: Fetch Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get HugeGraph stable commit id
+        id: get-commit
+        uses: ./.github/actions/get-hugegraph-commit
+
+      - name: Setup Java environment
+        uses: ./.github/actions/setup-java-env
+        with:
+          java-version: ${{ matrix.JAVA_VERSION }}
+          distribution: 'adopt'
+          use-stage: ${{ env.USE_STAGE }}
+
+      - name: Cache Hadoop
+        uses: actions/cache@v4
+        with:
+          path: ~/hadoop-3.3.6.tar.gz
+          key: ${{ runner.os }}-hadoop-3.3.6
+
+      - name: Cache HugeGraph Server
+        uses: actions/cache@v4
+        with:
+          path: ~/hugegraph-cache-${{ steps.get-commit.outputs.commit_id }}
+          key: ${{ runner.os }}-hugegraph-server-${{ steps.get-commit.outputs.commit_id }}
+
+      - name: Compile
+        run: |
+          mvn install -pl hugegraph-client,hugegraph-loader -am -Dmaven.javadoc.skip=true -DskipTests -ntp
+
+      - name: Prepare env and service
+        env:
+          COMMIT_ID: ${{ steps.get-commit.outputs.commit_id }}
+        run: |
+          $TRAVIS_DIR/install-hadoop.sh
+          $TRAVIS_DIR/install-hugegraph-from-source.sh $COMMIT_ID
+
+      - name: Run test
+        run: |
+          cd hugegraph-loader && ls
+          mvn test -P unit -ntp
+          mvn test -P file
+          mvn test -P hdfs
+          mvn test -P jdbc
+          mvn test -P kafka
+
+      - name: Upload coverage to Codecov
+        uses: ./.github/actions/upload-coverage
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: target/jacoco.xml

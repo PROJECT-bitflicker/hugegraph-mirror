@@ -1,0 +1,96 @@
+name: "hubble-ci"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - /^release-.*$/
+    paths:
+      - hugegraph-hubble/**
+      - hugegraph-dist/**
+      - hugegraph-loader/**
+      - .github/workflows/**
+      - pom.xml
+  pull_request:
+    paths:
+      - hugegraph-hubble/**
+      - hugegraph-dist/**
+      - hugegraph-loader/**
+      - hugegraph-client/**
+      - .github/workflows/**
+      - pom.xml
+
+env:
+  TRAVIS_DIR: hugegraph-hubble/hubble-dist/assembly/travis
+
+jobs:
+  hubble-ci:
+    runs-on: ubuntu-latest
+    env:
+      USE_STAGE: 'true' # Whether to include the stage repository.
+      STATIC_DIR: hugegraph-hubble/hubble-dist/assembly/static
+    strategy:
+      matrix:
+        JAVA_VERSION: ['11']
+        python-version: ["3.11"]
+
+    steps:
+      - name: Fetch Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get HugeGraph stable commit id
+        id: get-commit
+        uses: ./.github/actions/get-hugegraph-commit
+
+      - name: Setup Java environment
+        uses: ./.github/actions/setup-java-env
+        with:
+          java-version: ${{ matrix.JAVA_VERSION }}
+          distribution: 'adopt'
+          use-stage: ${{ env.USE_STAGE }}
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Compile
+        run: |
+          mvn install -pl hugegraph-client,hugegraph-loader -am -Dmaven.javadoc.skip=true -DskipTests -ntp
+          cd hugegraph-hubble && ls *
+          mvn -e compile -Dmaven.javadoc.skip=true -ntp
+
+      - name: Prepare env and service
+        env:
+          COMMIT_ID: ${{ steps.get-commit.outputs.commit_id }}
+        run: |
+          python -m pip install -r ${TRAVIS_DIR}/requirements.txt
+          cd hugegraph-hubble
+          mvn package -Dmaven.test.skip=true
+          cd apache-hugegraph-hubble-*
+          cd bin
+          ./start-hubble.sh -d
+          ./stop-hubble.sh
+          cd ../../../
+          pwd
+          $TRAVIS_DIR/install-hugegraph.sh $COMMIT_ID
+
+      - name: Unit test
+        run: mvn test -P unit-test -pl hugegraph-hubble/hubble-be -ntp
+
+      - name: API test
+        env:
+          CI: false
+        run: |
+          cd hugegraph-hubble && ls
+          hubble-dist/assembly/travis/run-api-test.sh
+
+      - name: Upload coverage to Codecov
+        uses: ./.github/actions/upload-coverage
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: target/site/jacoco/*.xml

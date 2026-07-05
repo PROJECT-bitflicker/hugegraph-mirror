@@ -1,0 +1,62 @@
+name: "spark-connector-ci"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - /^release-.*$/
+    paths:
+      - hugegraph-spark-connector/**
+      - hugegraph-dist/**
+      - .github/workflows/**
+      - pom.xml
+  pull_request:
+    paths:
+      - hugegraph-spark-connector/**
+      - hugegraph-dist/**
+      - hugegraph-client/**
+      - .github/workflows/**
+      - pom.xml
+
+jobs:
+  spark-connector-ci:
+    runs-on: ubuntu-latest
+    env:
+      USE_STAGE: 'true' # Whether to include the stage repository.
+      TRAVIS_DIR: hugegraph-spark-connector/assembly/travis
+    strategy:
+      matrix:
+        JAVA_VERSION: [ '11' ]
+
+    steps:
+      - name: Fetch Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get HugeGraph stable commit id
+        id: get-commit
+        uses: ./.github/actions/get-hugegraph-commit
+
+      - name: Setup Java environment
+        uses: ./.github/actions/setup-java-env
+        with:
+          java-version: ${{ matrix.JAVA_VERSION }}
+          distribution: 'adopt'
+          use-stage: ${{ env.USE_STAGE }}
+
+      - name: Compile
+        run: |
+          mvn install -pl hugegraph-client,hugegraph-spark-connector -am -Dmaven.javadoc.skip=true -DskipTests -ntp
+
+      - name: Setup HugeGraph server
+        uses: ./.github/actions/setup-hugegraph-server
+        with:
+          travis-dir: ${{ env.TRAVIS_DIR }}
+          commit-id: ${{ steps.get-commit.outputs.commit_id }}
+
+      - name: Run test
+        run: |
+          cd hugegraph-spark-connector && ls
+          mvn test
