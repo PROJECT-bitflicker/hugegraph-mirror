@@ -2110,6 +2110,19 @@ public final class GraphManager {
         for (String key : this.metaManager.graphConfigs(graphSpace).keySet()) {
             graphs.add(key.split(DELIMITER)[1]);
         }
+        if (DEFAULT_GRAPH_SPACE_SERVICE_NAME.equals(graphSpace)) {
+            String prefix = spaceGraphName(graphSpace, "");
+            for (String key : this.graphs.keySet()) {
+                if (!key.startsWith(prefix)) {
+                    continue;
+                }
+                String graph = key.substring(prefix.length());
+                if (SYS_GRAPH.equals(graph)) {
+                    continue;
+                }
+                graphs.add(graph);
+            }
+        }
         return graphs;
     }
 
@@ -2119,7 +2132,14 @@ public final class GraphManager {
         }
         GraphSpace space = this.graphSpaces.get(name);
         if (space == null) {
+            // Cache miss: try to load from etcd and populate the local cache
+            // so that subsequent calls (e.g. validGraphSpace checks) don't fail
+            // due to a race between the graphspace-create event and the listener
+            // updating this.graphSpaces.
             space = this.metaManager.graphSpace(name);
+            if (space != null) {
+                this.graphSpaces.putIfAbsent(name, space);
+            }
         }
         return space;
     }
@@ -2147,9 +2167,27 @@ public final class GraphManager {
         if (StringUtils.isEmpty(nickname)) {
             return false;
         }
+        if (!isPDEnabled()) {
+            // In non-PD mode, metaManager is not initialized.
+            // Check nickname against in-memory graphs (same pattern as graphs()).
+            for (Map.Entry<String, Graph> entry : this.graphs.entrySet()) {
+                String key = entry.getKey();
+                String[] parts = key.split(DELIMITER, 2);
+                if (parts.length == 2 && parts[0].equals(graphSpace) &&
+                    entry.getValue() instanceof HugeGraph) {
+                    HugeGraph hg = (HugeGraph) entry.getValue();
+                    if (nickname.equals(hg.nickname())) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        // PD mode: check via metaManager
         for (Map<String, Object> graphConfig :
                 this.metaManager.graphConfigs(graphSpace).values()) {
-            if (nickname.equals(graphConfig.get("nickname").toString())) {
+            Object nick = graphConfig.get("nickname");
+            if (nick != null && nickname.equals(nick.toString())) {
                 return true;
             }
         }
@@ -2185,12 +2223,93 @@ public final class GraphManager {
         return this.metaManager.getGraphConfig(graphSpace, graphName);
     }
 
+    /**
+     * Update the nickname of a graph.
+     * In non-PD mode (standalone RocksDB), only the in-memory instance is updated
+     * since local config files cannot be hot-reloaded.
+     * In PD mode, the change is also persisted to the meta storage so it
+     * survives restarts.
+     */
+    public void updateGraphNickname(String graphSpace, String graphName,
+                                    String nickname) {
+        // Always update the in-memory graph instance first
+        HugeGraph g = this.graph(graphSpace, graphName);
+        // Capture the old nickname so we can restore it on failure
+        String oldNickname = g != null ? g.nickname() : null;
+        if (g != null) {
+            g.nickname(nickname);
+        }
+        if (!isPDEnabled()) {
+            // Non-PD mode: in-memory only, acceptable for standalone RocksDB
+            return;
+        }
+        Map<String, Object> configs;
+        try {
+            configs = this.metaManager.getGraphConfig(graphSpace, graphName);
+            if (configs == null) {
+                return;
+            }
+            configs.put("nickname", nickname);
+            this.metaManager.updateGraphConfig(graphSpace, graphName, configs);
+        } catch (Exception e) {
+            // Roll back only if the PD metadata write did not succeed.
+            if (g != null) {
+                g.nickname(oldNickname);
+            }
+            throw new HugeException("Failed to persist nickname for graph " +
+                                    "'%s/%s'", e, graphSpace, graphName);
+        }
+        try {
+            this.metaManager.notifyGraphUpdate(graphSpace, graphName);
+        } catch (Exception e) {
+            LOG.warn("Failed to notify graph nickname update for graph '{}/{}'",
+                     graphSpace, graphName, e);
+        }
+    }
+
     public String pdPeers() {
         return this.pdPeers;
     }
 
     public String cluster() {
         return this.cluster;
+    }
+
+    public Set<String> schemaTemplates(String graphSpace) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
+        return this.metaManager.schemaTemplates(graphSpace);
+    }
+
+    public void createSchemaTemplate(String graphSpace, SchemaTemplate template) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
+        checkSchemaTemplateName(template.name());
+        this.metaManager.addSchemaTemplate(graphSpace, template);
+    }
+
+    public void dropSchemaTemplate(String graphSpace, String name) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
+        this.metaManager.removeSchemaTemplate(graphSpace, name);
+    }
+
+    public void updateSchemaTemplate(String graphSpace, SchemaTemplate template) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
+        this.metaManager.updateSchemaTemplate(graphSpace, template);
+    }
+
+    private static void checkSchemaTemplateName(String name) {
+        checkName(name, "schema template");
     }
 
     private enum PdRegisterType {
