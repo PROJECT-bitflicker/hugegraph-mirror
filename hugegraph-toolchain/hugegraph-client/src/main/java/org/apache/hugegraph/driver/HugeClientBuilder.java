@@ -54,7 +54,8 @@ public class HugeClientBuilder {
 
     public HugeClientBuilder(String url, String graphSpace, String graph) {
         this.url = url;
-        this.graphSpace = graphSpace;
+        this.graphSpace = (graphSpace == null || graphSpace.isEmpty()) ? 
+                          DEFAULT_GRAPHSPACE : graphSpace;
         this.graph = graph;
         this.username = "";
         this.password = "";
@@ -77,8 +78,8 @@ public class HugeClientBuilder {
                             "Expect a string value as the url parameter argument, but got: %s",
                             this.url);
             E.checkArgument(this.graph != null && !this.graph.isEmpty(),
-                            "Expect a string value as the graph name parameter argument, but got: %s",
-                            this.graph);
+                            "Expect a string value as the graph name " +
+                            "parameter argument, but got: %s", this.graph);
         }
         return new HugeClient(this);
     }
@@ -89,7 +90,8 @@ public class HugeClientBuilder {
     }
 
     public HugeClientBuilder configGraphSpace(String graphSpace) {
-        this.graphSpace = graphSpace;
+        this.graphSpace = (graphSpace == null || graphSpace.isEmpty()) ? 
+                          DEFAULT_GRAPHSPACE : graphSpace;
         return this;
     }
 

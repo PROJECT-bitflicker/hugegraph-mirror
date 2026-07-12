@@ -21,6 +21,7 @@ import java.util.Map;
 
 import org.apache.hugegraph.api.graphs.GraphsAPI;
 import org.apache.hugegraph.client.RestClient;
+import org.apache.hugegraph.driver.GraphsManager;
 import org.apache.hugegraph.rest.RestHeaders;
 import org.apache.hugegraph.rest.RestResult;
 import org.apache.hugegraph.testutil.Assert;
@@ -106,5 +107,64 @@ public class GraphsAPITest extends BaseUnitTest {
         Assert.assertNotNull(capturedParams);
         Assert.assertEquals("source-graph",
                             capturedParams.get("clone_graph_name"));
+    }
+
+    @Test
+    public void testSetDefaultGraphUsesCanonicalPost() {
+        RestResult mockResult = Mockito.mock(RestResult.class);
+        Mockito.when(mockResult.readObject(Map.class))
+               .thenReturn(null);
+
+        ArgumentCaptor<String> pathCaptor =
+                ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object> bodyCaptor =
+                ArgumentCaptor.forClass(Object.class);
+
+        Mockito.when(this.mockClient.post(pathCaptor.capture(),
+                                          bodyCaptor.capture()))
+               .thenReturn(mockResult);
+
+        this.graphsAPI.setDefault("test-graph");
+
+        Assert.assertEquals("graphspaces/DEFAULT/graphs/test-graph/default",
+                            pathCaptor.getValue());
+        Assert.assertTrue(((Map<?, ?>) bodyCaptor.getValue()).isEmpty());
+        Mockito.verify(mockResult).readObject(Map.class);
+    }
+
+    @Test
+    public void testUnsetDefaultGraphUsesCanonicalDelete() {
+        RestResult mockResult = Mockito.mock(RestResult.class);
+        Mockito.when(mockResult.readObject(Map.class))
+               .thenReturn(null);
+
+        ArgumentCaptor<String> pathCaptor =
+                ArgumentCaptor.forClass(String.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> paramsCaptor =
+                ArgumentCaptor.forClass(Map.class);
+
+        Mockito.when(this.mockClient.delete(pathCaptor.capture(),
+                                            paramsCaptor.capture()))
+               .thenReturn(mockResult);
+
+        this.graphsAPI.unSetDefault("test-graph");
+
+        Assert.assertEquals("graphspaces/DEFAULT/graphs/test-graph/default",
+                            pathCaptor.getValue());
+        Assert.assertTrue(paramsCaptor.getValue().isEmpty());
+        Mockito.verify(mockResult).readObject(Map.class);
+    }
+
+    @Test
+    public void testPerGraphReloadIsDeprecated() throws NoSuchMethodException {
+        Assert.assertNotNull(GraphsAPI.class.getMethod("reload", String.class)
+                                            .getAnnotation(Deprecated.class));
+        Assert.assertNotNull(GraphsManager.class.getMethod("reload", String.class)
+                                                .getAnnotation(Deprecated.class));
+        Assert.assertNull(GraphsAPI.class.getMethod("reload")
+                                         .getAnnotation(Deprecated.class));
+        Assert.assertNull(GraphsManager.class.getMethod("reload")
+                                             .getAnnotation(Deprecated.class));
     }
 }
