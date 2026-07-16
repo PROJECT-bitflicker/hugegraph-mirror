@@ -1,5 +1,7 @@
 # hugegraph-mirror
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/PROJECT-bitflicker/hugegraph-mirror)
+
 A single, continuously-updated mirror of the active Apache HugeGraph repos,
 maintained so it can be pointed at DeepWiki (or anything else) as one
 source of truth instead of five.
