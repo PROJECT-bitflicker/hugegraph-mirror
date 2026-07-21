@@ -20,10 +20,15 @@ import i18n from 'i18next';
 import {initReactI18next} from 'react-i18next';
 
 import {zhCNResources, enUSResources} from './resources';
+import {
+    DEFAULT_LANGUAGE,
+    getCurrentLanguage,
+    syncDocumentLanguage,
+} from '../utils/language';
 
 i18n.use(initReactI18next).init({
-    lng: localStorage.getItem('languageType') || 'zh-CN',
-    fallbackLng: 'zh-CN',
+    lng: getCurrentLanguage(),
+    fallbackLng: DEFAULT_LANGUAGE,
 
     resources: {
         'zh-CN': zhCNResources,
@@ -34,5 +39,8 @@ i18n.use(initReactI18next).init({
         escapeValue: false, // not needed for react as it escapes by default
     },
 });
+
+syncDocumentLanguage(i18n.language);
+i18n.on('languageChanged', syncDocumentLanguage);
 
 export default i18n;

@@ -25,13 +25,17 @@ import {
     message,
     Tooltip,
     Modal,
+    Tag,
+    Tabs,
 } from 'antd';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import TableHeader from '../../components/TableHeader';
 import EditLayer from './EditLayer';
 import * as api from '../../api';
-import {getUser} from '../../utils/user';
+import {useAuthContext} from '../../auth/AuthContext';
+import {getAccountLevel} from './level';
+import SpaceAccess from './SpaceAccess';
 
 const PAGE_ERROR_CONFIG = {suppressBusinessErrorToast: true};
 
@@ -41,8 +45,16 @@ const RowAction = ({onAction, row, children}) => {
     return <Button type='link' onClick={handleClick}>{children}</Button>;
 };
 
-const Account = () => {
+const GlobalAccounts = () => {
     const {t} = useTranslation();
+    const {context} = useAuthContext();
+    const accountActions = context?.actions?.accounts ?? [];
+    const authorizationActions = context?.actions?.authorizations ?? [];
+    const canCreateAccount = accountActions.includes('create');
+    const canUpdateAccount = accountActions.includes('update');
+    const canDeleteAccount = accountActions.includes('delete');
+    const canGrantAuthorization = authorizationActions.includes('grant');
+    const hasRowMutations = canUpdateAccount || canDeleteAccount || canGrantAuthorization;
     const [editLayerVisible, setEditLayerVisible] = useState(false);
     const [op, setOp] = useState('detail');
     const [detail, setDetail] = useState({});
@@ -121,6 +133,16 @@ const Account = () => {
             render: val => <Tooltip title={val} placement='bottomLeft'>{val}</Tooltip>,
         },
         {
+            title: t('account.col.level'),
+            width: 140,
+            render: row => {
+                const level = getAccountLevel(row);
+                const color = level === 'ADMIN' ? 'red'
+                    : level === 'SPACEADMIN' ? 'blue' : 'default';
+                return <Tag color={color}>{t(`account.level.${level}`)}</Tag>;
+            },
+        },
+        {
             title: t('account.col.resource'),
             dataIndex: 'spacenum',
             width: 120,
@@ -133,26 +155,30 @@ const Account = () => {
         },
         {
             title: t('common.operation'),
-            width: 300,
+            width: hasRowMutations ? 300 : 100,
             align: 'center',
             render: row => (
                 <Space>
                     <RowAction onAction={showDetail} row={row}>
                         {t('common.action.detail')}
                     </RowAction>
-                    <RowAction onAction={showEdit} row={row}>
-                        {t('common.action.edit')}
-                    </RowAction>
-                    <RowAction onAction={showAuth} row={row}>
-                        {t('common.action.assign_permission')}
-                    </RowAction>
-                    {row.user_name !== 'admin'
-                        && row.user_name !== getUser().id
-                        && (
-                            <RowAction onAction={handleDelete} row={row}>
-                                {t('common.action.delete')}
-                            </RowAction>
-                        )}
+                    {canUpdateAccount && (
+                        <RowAction onAction={showEdit} row={row}>
+                            {t('common.action.edit')}
+                        </RowAction>
+                    )}
+                    {canGrantAuthorization && (
+                        <RowAction onAction={showAuth} row={row}>
+                            {t('common.action.assign_permission')}
+                        </RowAction>
+                    )}
+                    {canDeleteAccount
+                        && row.user_name !== 'admin'
+                        && row.user_name !== context?.username && (
+                        <RowAction onAction={handleDelete} row={row}>
+                            {t('common.action.delete')}
+                        </RowAction>
+                    )}
                 </Space>
             ),
         },
@@ -204,40 +230,36 @@ const Account = () => {
 
     return (
         <>
-            <PageHeader
-                ghost={false}
-                onBack={false}
-                title={t('account.title')}
-            />
-
-            <div className='container'>
-                {listError && (
-                    <Alert
-                        type='error'
-                        showIcon
-                        message={t('account.load.unavailable')}
-                        action={(
-                            <Button size='small' onClick={loadAccounts}>
-                                {t('account.load.retry')}
-                            </Button>
-                        )}
-                    />
-                )}
-                <TableHeader>
-                    <Space>
-                        <Button onClick={showAdd} type='primary'>{t('account.create')}</Button>
-                    </Space>
-                </TableHeader>
-
-                <Table
-                    columns={columns}
-                    dataSource={data}
-                    rowKey={rowKey}
-                    pagination={pagination}
-                    onChange={handleTable}
-                    loading={listLoading}
+            {listError && (
+                <Alert
+                    type='error'
+                    showIcon
+                    message={t('account.load.unavailable')}
+                    action={(
+                        <Button size='small' onClick={loadAccounts}>
+                            {t('account.load.retry')}
+                        </Button>
+                    )}
                 />
-            </div>
+            )}
+            <TableHeader>
+                <Space>
+                    {canCreateAccount && (
+                        <Button onClick={showAdd} type='primary'>
+                            {t('account.create')}
+                        </Button>
+                    )}
+                </Space>
+            </TableHeader>
+
+            <Table
+                columns={columns}
+                dataSource={data}
+                rowKey={rowKey}
+                pagination={pagination}
+                onChange={handleTable}
+                loading={listLoading}
+            />
 
             <EditLayer
                 visible={editLayerVisible}
@@ -245,7 +267,79 @@ const Account = () => {
                 data={detail}
                 onCancel={handleHideLayer}
                 refresh={handleRefresh}
+                allowedOperations={{
+                    create: canCreateAccount,
+                    edit: canUpdateAccount,
+                    auth: canGrantAuthorization,
+                }}
             />
+        </>
+    );
+};
+
+const Account = () => {
+    const {t} = useTranslation();
+    const {context, refresh: refreshPermissions} = useAuthContext();
+    const actions = context?.actions ?? {};
+    const canReadGlobalAccounts = (actions.accounts ?? []).includes('read');
+    const canReadScopedAccess = [
+        ...(actions.members ?? []),
+        ...(actions.roles ?? []),
+        ...(actions.authorizations ?? []),
+    ].includes('read');
+    const refreshPermissionContext = useCallback(
+        () => Promise.resolve(refreshPermissions?.()).catch(() => undefined),
+        [refreshPermissions]
+    );
+
+    let content = null;
+    if (canReadGlobalAccounts && canReadScopedAccess) {
+        content = (
+            <Tabs
+                items={[
+                    {
+                        key: 'global',
+                        label: t('account.space_access.global_tab'),
+                        children: <GlobalAccounts />,
+                    },
+                    {
+                        key: 'scoped',
+                        label: t('account.space_access.scoped_tab'),
+                        children: <SpaceAccess />,
+                    },
+                ]}
+            />
+        );
+    }
+    else if (canReadGlobalAccounts) {
+        content = <GlobalAccounts />;
+    }
+    else if (canReadScopedAccess) {
+        content = <SpaceAccess />;
+    }
+    else {
+        content = (
+            <Alert
+                type='warning'
+                showIcon
+                message={t('account.permission_changed')}
+                description={t('account.permission_changed_description')}
+                action={(
+                    <Button
+                        size='small'
+                        onClick={refreshPermissionContext}
+                    >
+                        {t('account.refresh_permissions')}
+                    </Button>
+                )}
+            />
+        );
+    }
+
+    return (
+        <>
+            <PageHeader ghost={false} onBack={false} title={t('account.title')} />
+            <div className='container'>{content}</div>
         </>
     );
 };

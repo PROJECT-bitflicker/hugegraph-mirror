@@ -31,6 +31,16 @@ const status = () => {
     return request.get('/auth/status', {suppressBusinessErrorToast: true});
 };
 
+const context = () => {
+    return request.get('/auth/context', {
+        suppressBusinessErrorToast: true,
+        headers: {
+            'Cache-Control': 'no-store',
+            Pragma: 'no-cache',
+        },
+    });
+};
+
 const getUserList = (params, config = {}) => {
     return request.get('/auth/users/list', {...config, params});
 };
@@ -65,100 +75,8 @@ const updatePwd = (username, oldpwd, newpwd) => {
 
 const importUserUrl = '/api/v1.3/auth/users/batch';
 
-export {login, logout, status, getUserList, getAllUserList, getUserInfo, delUser,
+export {login, logout, status, context, getUserList, getAllUserList, getUserInfo, delUser,
     updateUser, addUser, updatePwd, importUserUrl, updateAdminspace};
-
-// resource
-
-const getResourceList = (graphspace, params) => {
-    return request.get(`/graphspaces/${graphspace}/auth/targets`, {params});
-};
-
-const addResource = (graphspace, data) => {
-    return request.post(`/graphspaces/${graphspace}/auth/targets`, data);
-};
-
-const updateResource = (graphspace, id, data) => {
-    return request.put(`/graphspaces/${graphspace}/auth/targets/${id}`, data);
-};
-
-const getResource = (graphspace, id) => {
-    return request.get(`/graphspaces/${graphspace}/auth/targets/${id}`);
-};
-
-const delResource = (graphspace, id) => {
-    return request.delete(`/graphspaces/${graphspace}/auth/targets/${id}`);
-};
-
-export {getResourceList, addResource, updateResource, getResource, delResource};
-
-// role
-
-const getRoleList = (graphspace, params) => {
-    return request.get(`/graphspaces/${graphspace}/auth/roles`, {params});
-};
-
-const getAllRoleList = graphspace => {
-    return request.get(`/graphspaces/${graphspace}/auth/roles/list`);
-};
-
-const addRole = (graphspace, data) => {
-    return request.post(`/graphspaces/${graphspace}/auth/roles`, data);
-};
-
-const updateRole = (graphspace, id, data) => {
-    return request.put(`/graphspaces/${graphspace}/auth/roles/${id}`, data);
-};
-
-const delRole = (graphspace, id) => {
-    return request.delete(`/graphspaces/${graphspace}/auth/roles/${id}`);
-};
-
-const delRoleBatch = (graphspace, data) => {
-    return request.delete(`/graphspaces/${graphspace}/auth/roles/`, data);
-};
-
-const getRoleResourceList = (graphspace, params) => {
-    return request.get(`/graphspaces/${graphspace}/auth/accesses`, {params});
-};
-
-const addRoleResource = (graphspace, data) => {
-    return request.post(`/graphspaces/${graphspace}/auth/accesses`, data);
-};
-
-const updateRoleResource = (graphspace, data) => {
-    return request.put(`/graphspaces/${graphspace}/auth/accesses`, data);
-};
-
-const delRoleResource = (graphspace, data) => {
-    return request.delete(`/graphspaces/${graphspace}/auth/accesses`, data);
-};
-
-const getRoleUser = (graphspace, params) => {
-    return request.get(`/graphspaces/${graphspace}/auth/belongs`, {params});
-};
-
-const addRoleUser = (graphspace, data) => {
-    return request.post(`/graphspaces/${graphspace}/auth/belongs`, data);
-};
-
-const addRoleUserBatch = (graphspace, data) => {
-    return request.post(`/graphspaces/${graphspace}/auth/belongs/ids`, data);
-};
-
-const delRoleUser = (graphspace, id) => {
-    return request.delete(`/graphspaces/${graphspace}/auth/belongs/${id}`);
-};
-
-const delRoleUserBatch = (graphspace, data) => {
-    return request.post(`/graphspaces/${graphspace}/auth/belongs/delids`, data);
-};
-
-export {
-    getRoleList, getAllRoleList, addRole, updateRole, delRole, delRoleBatch,
-    getRoleResourceList, addRoleResource, updateRoleResource, delRoleResource,
-    getRoleUser, addRoleUser, addRoleUserBatch, delRoleUser, delRoleUserBatch,
-};
 
 const getPersonal = config => {
     return request.get('/auth/users/getpersonal', config);
@@ -170,12 +88,101 @@ const updatePersonal = data => {
 
 export {getPersonal, updatePersonal};
 
+const scopedAuthPath = (graphspace, resource, id) => {
+    const base = `/graphspaces/${encodeURIComponent(graphspace)}/auth/${resource}`;
+    return id === undefined ? base : `${base}/${encodeURIComponent(id)}`;
+};
+
+const getSpaceMembers = (graphspace, params, config = {}) => {
+    return request.get(scopedAuthPath(graphspace, 'users'), {...config, params});
+};
+
+const addSpaceMember = (graphspace, data, config) => {
+    return request.post(scopedAuthPath(graphspace, 'users'), data, config);
+};
+
+const updateSpaceMember = (graphspace, id, data, config) => {
+    return request.put(scopedAuthPath(graphspace, 'users', id), data, config);
+};
+
+const deleteSpaceMember = (graphspace, id, config) => {
+    return request.delete(scopedAuthPath(graphspace, 'users', id),
+        undefined, config);
+};
+
+const getSpaceRoles = (graphspace, params, config = {}) => {
+    return request.get(scopedAuthPath(graphspace, 'roles'), {...config, params});
+};
+
+const addSpaceRole = (graphspace, data, config) => {
+    return request.post(scopedAuthPath(graphspace, 'roles'), data, config);
+};
+
+const updateSpaceRole = (graphspace, id, data, config) => {
+    return request.put(scopedAuthPath(graphspace, 'roles', id), data, config);
+};
+
+const deleteSpaceRole = (graphspace, id, config) => {
+    return request.delete(scopedAuthPath(graphspace, 'roles', id),
+        undefined, config);
+};
+
+const getSpaceTargets = (graphspace, params, config = {}) => {
+    return request.get(scopedAuthPath(graphspace, 'targets'), {...config, params});
+};
+
+const addSpaceTarget = (graphspace, data, config) => {
+    return request.post(scopedAuthPath(graphspace, 'targets'), data, config);
+};
+
+const updateSpaceTarget = (graphspace, id, data, config) => {
+    return request.put(scopedAuthPath(graphspace, 'targets', id), data, config);
+};
+
+const deleteSpaceTarget = (graphspace, id, config) => {
+    return request.delete(scopedAuthPath(graphspace, 'targets', id),
+        undefined, config);
+};
+
+const getSpaceAccesses = (graphspace, params, config = {}) => {
+    return request.get(scopedAuthPath(graphspace, 'accesses'), {...config, params});
+};
+
+const saveSpaceAccess = (graphspace, data, config) => {
+    return request.put(scopedAuthPath(graphspace, 'accesses'), data, config);
+};
+
+const deleteSpaceAccess = (graphspace, roleId, targetId, config) => {
+    return request.delete(scopedAuthPath(graphspace, 'accesses'), {
+        role_id: roleId,
+        target_id: targetId,
+    }, config);
+};
+
+export {
+    getSpaceMembers,
+    addSpaceMember,
+    updateSpaceMember,
+    deleteSpaceMember,
+    getSpaceRoles,
+    addSpaceRole,
+    updateSpaceRole,
+    deleteSpaceRole,
+    getSpaceTargets,
+    addSpaceTarget,
+    updateSpaceTarget,
+    deleteSpaceTarget,
+    getSpaceAccesses,
+    saveSpaceAccess,
+    deleteSpaceAccess,
+};
+
 const getDashboard = () => {
     return request.get('/dashboard');
 };
 
-const getVermeer = () => {
-    return request.get('/vermeer');
+const getVermeer = config => {
+    return config ? request.get('/vermeer', config) : request.get('/vermeer');
 };
 
 export {getDashboard, getVermeer};

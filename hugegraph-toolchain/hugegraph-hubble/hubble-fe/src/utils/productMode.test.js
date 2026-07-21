@@ -40,9 +40,9 @@ describe('product mode helpers', () => {
         expect(getGraphspacePath(false)).toBe('/graphspace/DEFAULT');
     });
 
-    test('treats graphspace lifecycle and schema template as PD-only paths', () => {
+    test('keeps Schema templates shared while guarding PD-only lifecycle paths', () => {
         expect(isPdOnlyPath('/graphspace')).toBe(true);
-        expect(isPdOnlyPath('/graphspace/DEFAULT/schema')).toBe(true);
+        expect(isPdOnlyPath('/graphspace/DEFAULT/schema')).toBe(false);
         expect(isPdOnlyPath('/account')).toBe(true);
         expect(isPdOnlyPath('/role/graphspace/DEFAULT/admin')).toBe(true);
         expect(isPdOnlyPath('/source')).toBe(false);
@@ -55,8 +55,8 @@ describe('product mode helpers', () => {
         expect(shouldUseNonPdDefaultGraphspace(true, 'demo')).toBe(false);
     });
 
-    test('disables graph create and default mutation in non-PD mode', () => {
-        expect(isGraphCreateEnabled(false)).toBe(false);
+    test('keeps graph create available while disabling default mutation in non-PD mode', () => {
+        expect(isGraphCreateEnabled(false)).toBe(true);
         expect(isGraphCreateEnabled(true)).toBe(true);
         expect(isGraphDefaultMutationEnabled(false)).toBe(false);
         expect(isGraphDefaultMutationEnabled(true)).toBe(true);
@@ -75,6 +75,18 @@ describe('product mode helpers', () => {
         expect(getTaskGraphspaceOptions(true, graphspaces)).toEqual([
             {label: 'Demo', value: 'demo'},
             {label: 'Default Name', value: 'DEFAULT'},
+        ]);
+    });
+
+    test('falls back to GraphSpace names when aliases are empty or echoed', () => {
+        expect(getTaskGraphspaceOptions(true, [
+            {name: 'empty', nickname: ''},
+            {name: 'echoed', nickname: 'echoed'},
+            {name: 'aliased', nickname: 'Aliased'},
+        ])).toEqual([
+            {label: 'empty', value: 'empty'},
+            {label: 'echoed', value: 'echoed'},
+            {label: 'Aliased', value: 'aliased'},
         ]);
     });
 });

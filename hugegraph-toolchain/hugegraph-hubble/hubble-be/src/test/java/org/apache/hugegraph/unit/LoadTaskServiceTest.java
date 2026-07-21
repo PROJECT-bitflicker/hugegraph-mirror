@@ -21,18 +21,24 @@ package org.apache.hugegraph.unit;
 import java.lang.reflect.Method;
 import java.lang.reflect.Field;
 import java.util.Arrays;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.junit.Test;
 
 import org.apache.hugegraph.entity.GraphConnection;
+import org.apache.hugegraph.entity.enums.LoadStatus;
 import org.apache.hugegraph.entity.load.FileMapping;
 import org.apache.hugegraph.entity.load.LoadParameter;
+import org.apache.hugegraph.entity.load.LoadTask;
+import org.apache.hugegraph.handler.LoadTaskExecutor;
 import org.apache.hugegraph.loader.executor.LoadOptions;
 import org.apache.hugegraph.service.load.LoadTaskService;
 import org.apache.hugegraph.mapper.load.LoadTaskMapper;
 import org.apache.hugegraph.testutil.Assert;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 
@@ -56,7 +62,7 @@ public class LoadTaskServiceTest {
     }
 
     @Test
-    public void testLoadOptionsPreferBasicCredentialPassword()
+    public void testLoadOptionsIgnorePasswordAndUseToken()
            throws Exception {
         GraphConnection connection = this.connection("admin-pass",
                                                      "session-token");
@@ -64,8 +70,110 @@ public class LoadTaskServiceTest {
         LoadOptions options = this.buildLoadOptions(connection);
 
         Assert.assertEquals("admin", options.username);
-        Assert.assertEquals("admin-pass", options.password);
-        Assert.assertNull(options.token);
+        Assert.assertNull(options.password);
+        Assert.assertEquals("session-token", options.token);
+    }
+
+    @Test
+    public void testLoadExecutionWaitsForOuterTransactionCommit()
+           throws Exception {
+        LoadTaskService service = new LoadTaskService();
+        LoadTaskExecutor executor = Mockito.mock(LoadTaskExecutor.class);
+        this.setField(service, "taskExecutor", executor);
+        this.setField(service, "runningTaskContainer", new ConcurrentHashMap<>());
+        LoadTask task = LoadTask.builder().id(9).build();
+        Method method = LoadTaskService.class.getDeclaredMethod(
+                "executeAfterCommit", LoadTask.class);
+        method.setAccessible(true);
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            method.invoke(service, task);
+            Mockito.verify(executor, Mockito.never())
+                   .execute(Mockito.any(), Mockito.any());
+
+            TransactionSynchronization synchronization =
+                    TransactionSynchronizationManager.getSynchronizations()
+                                                     .get(0);
+            synchronization.afterCommit();
+            Mockito.verify(executor).execute(Mockito.eq(task), Mockito.any());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    public void testResumeRehydratesLoaderWithCurrentSessionToken()
+           throws Exception {
+        LoadTaskService service = new LoadTaskService();
+        LoadTaskMapper mapper = Mockito.mock(LoadTaskMapper.class);
+        LoadTaskExecutor executor = Mockito.mock(LoadTaskExecutor.class);
+        LoadTask task = Mockito.mock(LoadTask.class);
+        LoadOptions options = new LoadOptions();
+        Mockito.when(mapper.selectById(9)).thenReturn(task);
+        Mockito.when(mapper.updateById(task)).thenReturn(1);
+        Mockito.when(task.getStatus()).thenReturn(LoadStatus.PAUSED);
+        Mockito.when(task.getOptions()).thenReturn(options);
+        this.setField(service, "mapper", mapper);
+        this.setField(service, "taskExecutor", executor);
+        this.setField(service, "runningTaskContainer",
+                      new ConcurrentHashMap<>());
+
+        LoadTask resumed = service.resume(9, "current-session-token");
+
+        Assert.assertSame(task, resumed);
+        Mockito.verify(task).reconnect("current-session-token");
+        Mockito.verify(executor).execute(Mockito.eq(task), Mockito.any());
+    }
+
+    @Test
+    public void testResumeDoesNotPersistRunningStateWhenReconnectFails()
+           throws Exception {
+        LoadTaskService service = new LoadTaskService();
+        LoadTaskMapper mapper = Mockito.mock(LoadTaskMapper.class);
+        LoadTaskExecutor executor = Mockito.mock(LoadTaskExecutor.class);
+        LoadTask task = Mockito.mock(LoadTask.class);
+        Mockito.when(mapper.selectById(9)).thenReturn(task);
+        Mockito.when(mapper.updateById(task)).thenReturn(1);
+        Mockito.when(task.getStatus()).thenReturn(LoadStatus.PAUSED);
+        Mockito.when(task.getOptions()).thenReturn(new LoadOptions());
+        Mockito.doThrow(new IllegalArgumentException("missing token"))
+               .when(task).reconnect("current-session-token");
+        this.setField(service, "mapper", mapper);
+        this.setField(service, "taskExecutor", executor);
+        this.setField(service, "runningTaskContainer",
+                      new ConcurrentHashMap<>());
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            service.resume(9, "current-session-token");
+        });
+
+        Mockito.verify(mapper, Mockito.never()).updateById(task);
+        Mockito.verify(executor, Mockito.never())
+               .execute(Mockito.any(), Mockito.any());
+    }
+
+    @Test
+    public void testRetryRehydratesLoaderWithCurrentSessionToken()
+           throws Exception {
+        LoadTaskService service = new LoadTaskService();
+        LoadTaskMapper mapper = Mockito.mock(LoadTaskMapper.class);
+        LoadTaskExecutor executor = Mockito.mock(LoadTaskExecutor.class);
+        LoadTask task = Mockito.mock(LoadTask.class);
+        Mockito.when(mapper.selectById(9)).thenReturn(task);
+        Mockito.when(mapper.updateById(task)).thenReturn(1);
+        Mockito.when(task.getStatus()).thenReturn(LoadStatus.STOPPED);
+        Mockito.when(task.getOptions()).thenReturn(new LoadOptions());
+        this.setField(service, "mapper", mapper);
+        this.setField(service, "taskExecutor", executor);
+        this.setField(service, "runningTaskContainer",
+                      new ConcurrentHashMap<>());
+
+        LoadTask retried = service.retry(9, "current-session-token");
+
+        Assert.assertSame(task, retried);
+        Mockito.verify(task).reconnect("current-session-token");
+        Mockito.verify(executor).execute(Mockito.eq(task), Mockito.any());
     }
 
     @Test
@@ -93,8 +201,8 @@ public class LoadTaskServiceTest {
         Assert.assertEquals("cluster-a", options.cluster);
         Assert.assertEquals("BOTH", options.routeType);
         Assert.assertEquals("admin", options.username);
-        Assert.assertEquals("admin-pass", options.password);
-        Assert.assertNull(options.token);
+        Assert.assertNull(options.password);
+        Assert.assertEquals("session-token", options.token);
         Assert.assertEquals("localhost", options.host);
         Assert.assertEquals(8080, options.port);
     }
@@ -116,7 +224,8 @@ public class LoadTaskServiceTest {
         Assert.assertEquals(8080, options.port);
         Assert.assertEquals("DEFAULT", options.graphSpace);
         Assert.assertEquals("hugegraph", options.graph);
-        Assert.assertEquals("admin-pass", options.password);
+        Assert.assertNull(options.password);
+        Assert.assertEquals("session-token", options.token);
     }
 
     private LoadOptions buildLoadOptions(GraphConnection connection)
@@ -127,6 +236,13 @@ public class LoadTaskServiceTest {
         method.setAccessible(true);
         return (LoadOptions) method.invoke(service, connection,
                                            this.fileMapping());
+    }
+
+    private void setField(Object object, String name, Object value)
+                          throws Exception {
+        Field field = object.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(object, value);
     }
 
     private GraphConnection connection(String password, String token) {

@@ -131,10 +131,15 @@ async function main() {
     }
   });
 
+  const graphspaceRoute = auth.pdEnabled
+    ? { name: 'graphspace', path: '/graphspace',
+        requiredApis: ['/api/v1.3/graphspaces'],
+        readySelector: '[data-testid="graphspace-page-title"]' }
+    : { name: 'graphspace', path: '/graphspace',
+        requiredApis: ['/api/v1.3/graphspaces/DEFAULT/graphs'],
+        textPattern: /图管理|Graph Management/ };
   const routes = [
-    { name: 'graphspace', path: '/graphspace',
-      requiredApis: ['/api/v1.3/graphspaces'],
-      textPattern: /图空间|Graph Space/ },
+    graphspaceRoute,
     { name: 'gremlin', path: '/gremlin',
       requiredApis: ['/api/v1.3/graphspaces/list'],
       textPattern: /Gremlin|图查询|查询/ },
@@ -172,12 +177,15 @@ async function main() {
                                    entry.businessStatus === 200))
         };
       });
+      const routeTextMatched = route.readySelector
+        ? await page.locator(route.readySelector).isVisible({ timeout: 5000 })
+        : route.textPattern.test(text);
       results.push({
         route: route.path,
         screenshot,
         matchedApis,
         rawI18nKeyFound: rawKeyPattern.test(text),
-        routeTextMatched: route.textPattern.test(text),
+        routeTextMatched,
         notFoundPage: /404|页面不存在|Not Found/.test(text),
         requestCount: network.length
       });

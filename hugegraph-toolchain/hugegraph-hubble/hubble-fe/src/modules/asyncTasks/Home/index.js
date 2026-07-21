@@ -23,7 +23,7 @@
 import React, {useCallback, useContext, useEffect, useRef, useState} from 'react';
 import GraphAnalysisContext from '../../Context';
 import {useParams} from 'react-router-dom';
-import {message, Input} from 'antd';
+import {Alert, Button, Empty, Input, Space} from 'antd';
 import AsyncTaskDetail from '../Detail';
 import * as api from '../../../api/index';
 import {useTranslation} from 'react-i18next';
@@ -41,7 +41,12 @@ const AsyncTaskHome = () => {
     const [search, setSearch] = useState(taskId);
     const [filters, setFilters] = useState({});
     const [asyncManageTaskData, setAsyncManageTaskData] = useState({});
+    const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
     let timer  = useRef();
+    const listRequest = useRef(null);
+    const listPending = useRef(false);
+    const listFailed = useRef(false);
 
     const onPageChange = useCallback(
         (pagination, filters) => {
@@ -52,7 +57,15 @@ const AsyncTaskHome = () => {
     );
 
     const getAsynTaskList = useCallback(
-        async () => {
+        async ({background = false} = {}) => {
+            const request = Symbol('async-task-list');
+            listRequest.current = request;
+            listPending.current = true;
+            if (!background) {
+                setLoading(true);
+                setLoadError(false);
+                setAsyncManageTaskData({});
+            }
             const {task_type, task_status} = filters;
             const params = {
                 'page_size': pageSize,
@@ -61,15 +74,34 @@ const AsyncTaskHome = () => {
                 status: task_status && task_status[0].toUpperCase(),
                 type: task_type && task_type[0],
             };
-            const response  = await api.analysis.fetchManageTaskList(graphSpace, graph, params);
-            const {status, message: asyncManageTaskListMessage, data} = response;
-            setAsyncManageTaskData({records: data.records, total: data.total});
-            if (status !== 200) {
-                clearInterval(timer.current);
-                message.error(asyncManageTaskListMessage || t('analysis.async_task.get_failed'));
+            try {
+                const response = await api.analysis.fetchManageTaskList(
+                    graphSpace, graph, params
+                );
+                if (listRequest.current !== request) {
+                    return;
+                }
+                const {status, data} = response || {};
+                if (status !== 200) {
+                    throw new Error('async task list unavailable');
+                }
+                setAsyncManageTaskData({records: data.records, total: data.total});
+                listFailed.current = false;
+            }
+            catch {
+                if (listRequest.current === request) {
+                    listFailed.current = true;
+                    setLoadError(true);
+                }
+            }
+            finally {
+                if (listRequest.current === request) {
+                    listPending.current = false;
+                    setLoading(false);
+                }
             }
         },
-        [filters, pageSize, page, search, graphSpace, graph, t]
+        [filters, pageSize, page, search, graphSpace, graph]
     );
 
     useEffect(
@@ -85,11 +117,23 @@ const AsyncTaskHome = () => {
     useEffect(() => {
         if (graphSpace && graph) {
             timer.current = setInterval(() => {
-                getAsynTaskList();
+                if (!listPending.current && !listFailed.current) {
+                    getAsynTaskList({background: true});
+                }
             }, 5000);
         }
         return () => clearInterval(timer.current);
     }, [getAsynTaskList, graph, graphSpace]);
+
+    useEffect(() => () => {
+        listRequest.current = null;
+        listPending.current = false;
+    }, []);
+
+    const retryList = useCallback(() => {
+        listFailed.current = false;
+        getAsynTaskList();
+    }, [getAsynTaskList]);
 
     const onSearchChange = useCallback(
         e => {
@@ -111,6 +155,17 @@ const AsyncTaskHome = () => {
         [search, searchCache]
     );
 
+    const clearFilters = useCallback(() => {
+        setSearchCache('');
+        setSearch('');
+        setFilters({});
+        setPage(defaultPageParams.page);
+    }, []);
+
+    const hasActiveFilters = Boolean(search) || Object.values(filters).some(value => (
+        Array.isArray(value) ? value.length > 0 : Boolean(value)
+    ));
+
     useEffect(
         () => {
             if (page > 1 && asyncManageTaskData?.records?.length === 0) {
@@ -130,6 +185,25 @@ const AsyncTaskHome = () => {
     return (
         <div className={c.gremlinAsyncTask}>
             <div className={c.content}>
+                <section
+                    className={c.help}
+                    aria-label={t('analysis.async_task.help_title')}
+                >
+                    <strong>{t('analysis.async_task.help_title')}</strong>
+                    <p>{t('analysis.async_task.help_description')}</p>
+                </section>
+                {loadError && (
+                    <Alert
+                        showIcon
+                        type='error'
+                        message={t('analysis.async_task.get_failed')}
+                        action={(
+                            <Button size='small' onClick={retryList}>
+                                {t('analysis.async_task.retry_list')}
+                            </Button>
+                        )}
+                    />
+                )}
                 <div className={c.queryBar}>
                     <Input.Search
                         value={searchCache}
@@ -140,13 +214,47 @@ const AsyncTaskHome = () => {
                         style={{width: '215px'}}
                     />
                 </div>
-                <AsyncTaskDetail
-                    onPageChange={onPageChange}
-                    asyncManageTaskData={asyncManageTaskData}
-                    getAsynTaskList={getAsynTaskList}
-                    page={page}
-                    pageSize={pageSize}
-                />
+                {!loading && !loadError && asyncManageTaskData.total === 0 ? (
+                    <Empty
+                        className={c.emptyJourney}
+                        description={(
+                            <div>
+                                <strong>{t(hasActiveFilters
+                                    ? 'analysis.async_task.no_matches_title'
+                                    : 'analysis.async_task.empty_title')}
+                                </strong>
+                                <p>{t(hasActiveFilters
+                                    ? 'analysis.async_task.no_matches_description'
+                                    : 'analysis.async_task.empty_description')}
+                                </p>
+                            </div>
+                        )}
+                    >
+                        {hasActiveFilters ? (
+                            <Button type='primary' onClick={clearFilters}>
+                                {t('analysis.async_task.clear_filters')}
+                            </Button>
+                        ) : (
+                            <Space wrap>
+                                <Button type='primary' href={`/gremlin/${graphSpace}/${graph}`}>
+                                    {t('analysis.async_task.start_query')}
+                                </Button>
+                                <Button href={`/algorithms/${graphSpace}/${graph}`}>
+                                    {t('analysis.async_task.open_algorithms')}
+                                </Button>
+                            </Space>
+                        )}
+                    </Empty>
+                ) : (
+                    <AsyncTaskDetail
+                        onPageChange={onPageChange}
+                        asyncManageTaskData={asyncManageTaskData}
+                        getAsynTaskList={getAsynTaskList}
+                        page={page}
+                        pageSize={pageSize}
+                        loading={loading}
+                    />
+                )}
             </div>
         </div>
     );

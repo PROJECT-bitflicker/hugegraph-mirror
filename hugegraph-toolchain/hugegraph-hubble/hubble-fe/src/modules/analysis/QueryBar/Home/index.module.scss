@@ -24,9 +24,15 @@
         .ant-tabs-nav {
             background-color: #f0f2f5;
             margin: 0px !important;
+            padding: 6px 10px;
         }
 
         .ant-tabs-card .ant-tabs-nav .ant-tabs-tab {
+            flex: 0 0 auto;
+            width: auto;
+            min-width: 0;
+            padding-right: 14px;
+            padding-left: 14px;
             background: #f0f2f5;
             border: 0px;
         }
@@ -36,9 +42,70 @@
         }
     }
 
+    :global(.ant-tabs-nav-list) {
+        flex: 0 0 auto;
+        width: auto;
+    }
+
     .hidden {
         display: none;
     }
+}
+
+.editorShell {
+    position: relative;
+
+    :global(.cm-content) {
+        padding-right: 280px;
+    }
+}
+
+.queryActions {
+    display: flex;
+    align-items: center;
+}
+
+.editorRegion {
+    position: relative;
+    min-height: 32px;
+
+    .editorToggle {
+        position: absolute;
+        top: 6px;
+        right: 10px;
+        z-index: 3;
+        color: #595959;
+    }
+}
+
+.editorShortcutHints {
+    position: absolute;
+    top: 8px;
+    right: 112px;
+    z-index: 2;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: flex-end;
+    max-width: calc(100% - 128px);
+    padding: 1px 6px;
+    color: #98a2b3;
+    font-size: 11px;
+    line-height: 16px;
+    white-space: nowrap;
+    background: rgb(255 255 255 / 88%);
+    border-radius: 4px;
+    pointer-events: none;
+}
+
+.text2gqlBadge {
+    margin-left: 6px;
+    padding: 0 5px;
+    color: #7b879c;
+    font-size: 10px;
+    line-height: 16px;
+    background: rgb(123 135 156 / 8%);
+    border-color: rgb(123 135 156 / 18%);
 }
 
 .text2gqlPlaceholder {
@@ -49,5 +116,30 @@
     p {
         margin: 0;
         color: #595959;
+    }
+}
+
+@media (max-width: 1366px) {
+    .queryBar :global(.ant-tabs-nav-list) {
+        flex: 0 0 auto;
+    }
+
+    .queryBar :global(.ant-tabs-nav-operations) {
+        display: none !important;
+    }
+
+    .editorShortcutHints {
+        right: 96px;
+    }
+}
+
+@media (max-width: 900px) {
+    .editorShell :global(.cm-content) {
+        padding-right: 112px;
+    }
+
+    .editorShortcutHints {
+        visibility: hidden;
+        opacity: 0;
     }
 }

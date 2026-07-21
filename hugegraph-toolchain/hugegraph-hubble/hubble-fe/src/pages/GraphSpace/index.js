@@ -18,6 +18,7 @@
 
 import {
     Alert,
+    Card,
     Table,
     Space,
     Row,
@@ -27,21 +28,23 @@ import {
     Input,
     Radio,
     DatePicker,
-    Card,
+    Empty,
     message,
     Modal,
     Pagination,
     Spin,
 } from 'antd';
+import {PlusOutlined} from '@ant-design/icons';
 import {useState, useEffect, useCallback, useRef} from 'react';
 import {useTranslation} from 'react-i18next';
 import {EditLayer} from './EditLayer';
-import TableHeader from '../../components/TableHeader';
 import {Link} from 'react-router-dom';
-import {PlusOutlined} from '@ant-design/icons';
 import GraphSpaceCard from './Card';
 import style from './index.module.scss';
 import * as api from '../../api/index';
+import {useAuthContext} from '../../auth/AuthContext';
+import {getResourceDisplayName} from '../../utils/displayName';
+import {TopbarPageContextSlot} from '../../components/Topbar/PageContextSlot';
 
 const PAGE_ERROR_CONFIG = {suppressBusinessErrorToast: true};
 
@@ -63,11 +66,16 @@ const GraphSpace = () => {
     const [refresh, setRefresh] = useState('false');
     const [dateData, setDateData] = useState('');
     const [graphspacename, setGraphspacename] = useState('');
-    const [pagination, setPagination] = useState({toatal: 0, current: 1, pageSize: 11});
+    const [pagination, setPagination] = useState({total: 0, current: 1, pageSize: 11});
     const [loading, setLoading] = useState(false);
     const [listError, setListError] = useState(false);
     const listRequest = useRef(null);
     const {t} = useTranslation();
+    const {context} = useAuthContext();
+    const graphspaceActions = context?.actions?.graphspaces ?? [];
+    const canCreateGraphspace = graphspaceActions.includes('create');
+    const canUpdateGraphspace = graphspaceActions.includes('update');
+    const canDeleteGraphspace = graphspaceActions.includes('delete');
 
     const handleCreate = useCallback(() => {
         setEditLayer(true);
@@ -86,17 +94,12 @@ const GraphSpace = () => {
         setEditLayer(true);
     }, []);
 
-    const createGraphspace = useCallback(() => {
-        setEditLayer(true);
-        setDetail(false);
-    }, []);
-
     const handleListType = useCallback(e => {
         setListType(e.target.value);
         setPagination(value => ({
             ...value,
             current: 1,
-            pageSize: e.target.value === 'image' ? 11 : 10,
+            pageSize: 11,
         }));
     }, []);
 
@@ -158,7 +161,9 @@ const GraphSpace = () => {
             title: t('graphspace.col.name'),
             render: row => (
                 <>
-                    <Link to={`/graphspace/${row.name}`}>{row.nickname}</Link>
+                    <Link to={`/graphspace/${row.name}`}>
+                        {getResourceDisplayName(row.name, row.nickname)}
+                    </Link>
                     {row.default && <span className={style.default}>{t('common.label.default')}</span>}
                 </>
             ),
@@ -207,13 +212,15 @@ const GraphSpace = () => {
                             <Link to={`/graphspace/${row.name}/schema`}>
                                 {t('common.action.schema_manage')}
                             </Link>
-                            <Button type='link' onClick={handleInit}>
-                                {t('common.action.init')}
-                            </Button>
+                            {canCreateGraphspace && (
+                                <Button type='link' onClick={handleInit}>
+                                    {t('common.action.init')}
+                                </Button>
+                            )}
                         </Space>
                     ) : (
                         <Space wrap>
-                            {(row.default)
+                            {!canUpdateGraphspace ? null : (row.default)
                                 ? <span className={style.disable}>{t('common.action.edit')}</span>
                                 : (
                                     <GraphSpaceRowAction onAction={editGraphspace} value={row}>
@@ -221,7 +228,7 @@ const GraphSpace = () => {
                                     </GraphSpaceRowAction>
                                 )
                             }
-                            {(row.default)
+                            {!canDeleteGraphspace ? null : (row.default)
                                 ? <span className={style.disable}>{t('common.action.delete')}</span>
                                 : (
                                     <GraphSpaceRowAction
@@ -291,24 +298,45 @@ const GraphSpace = () => {
             <PageHeader
                 ghost={false}
                 onBack={false}
-                title={t('graphspace.title')}
+                title={
+                    <span data-testid='graphspace-page-title'>
+                        {t('graphspace.title')}
+                    </span>
+                }
             >
                 <Row justify='space-between'>
                     <Col>
-                        <DatePicker onChange={handleDatePickerChange} />
+                        <Space>
+                            {listType === 'list' && canCreateGraphspace
+                                && !loading && !listError && (
+                                <Button
+                                    type='primary'
+                                    icon={<PlusOutlined />}
+                                    onClick={handleCreate}
+                                    aria-label={t('graphspace.create')}
+                                >
+                                    {t('graphspace.create')}
+                                </Button>
+                            )}
+                            <DatePicker onChange={handleDatePickerChange} />
+                        </Space>
                     </Col>
                     <Col>
                         <Space>
-                            <Radio.Group
-                                options={[
-                                    {label: t('common.label.view_mode'), value: 'image'},
-                                    {label: t('common.label.list_mode'), value: 'list'},
-                                ]}
-                                optionType='button'
-                                buttonStyle='solid'
-                                defaultValue={'image'}
-                                onChange={handleListType}
-                            />
+                            <TopbarPageContextSlot>
+                                <Radio.Group
+                                    role='radiogroup'
+                                    aria-label={t('graphspace.view_mode')}
+                                    options={[
+                                        {label: t('common.label.view_mode'), value: 'image'},
+                                        {label: t('common.label.list_mode'), value: 'list'},
+                                    ]}
+                                    optionType='button'
+                                    buttonStyle='solid'
+                                    value={listType}
+                                    onChange={handleListType}
+                                />
+                            </TopbarPageContextSlot>
                             <Input.Search
                                 placeholder={t('graphspace.search_placeholder')}
                                 onSearch={handleSearch}
@@ -337,18 +365,15 @@ const GraphSpace = () => {
                         ? (
                             <>
                                 <Row gutter={[10, 10]} justify='start'>
-                                    <Col span={8} key='add'>
-                                        <Card
-                                            className={style.add_card}
-                                            onClick={handleCreate}
-                                            onKeyDown={handleCreateKeyDown}
-                                            role='button'
-                                            tabIndex={0}
-                                        >
-                                            <Space><PlusOutlined />{t('graphspace.create')}</Space>
-                                        </Card>
-                                    </Col>
-
+                                    {!loading && !listError && data.length === 0 && (
+                                        <Col span={canCreateGraphspace ? 16 : 24}>
+                                            <Empty
+                                                description={t(graphspacename || dateData
+                                                    ? 'graphspace.no_matches'
+                                                    : 'graphspace.empty')}
+                                            />
+                                        </Col>
+                                    )}
                                     {data.map(item => {
                                         return (
                                             <Col span={8} key={item.name}>
@@ -357,10 +382,30 @@ const GraphSpace = () => {
                                                     deleteGraphspace={deleteGraphspace}
                                                     editGraphspace={editGraphspace}
                                                     handleInit={handleInit}
+                                                    canUpdate={canUpdateGraphspace}
+                                                    canDelete={canDeleteGraphspace}
+                                                    canInit={canCreateGraphspace}
                                                 />
                                             </Col>
                                         );
                                     })}
+                                    {!loading && !listError && canCreateGraphspace && (
+                                        <Col span={8} key='add'>
+                                            <Card
+                                                className={style.add_card}
+                                                onClick={handleCreate}
+                                                role='button'
+                                                aria-label={t('graphspace.create')}
+                                                tabIndex={0}
+                                                onKeyDown={handleCreateKeyDown}
+                                            >
+                                                <Space>
+                                                    <PlusOutlined />
+                                                    {t('graphspace.create')}
+                                                </Space>
+                                            </Card>
+                                        </Col>
+                                    )}
                                 </Row>
                                 <br />
                                 <Row justify='end'>
@@ -370,20 +415,17 @@ const GraphSpace = () => {
                                             total={pagination.total}
                                             pageSize={pagination.pageSize}
                                             current={pagination.current}
+                                            showSizeChanger={false}
                                         />
                                     </Col>
                                 </Row>
                             </>
                         ) : (
                             <>
-                                <TableHeader>
-                                    <Button onClick={createGraphspace} type='primary'>
-                                        {t('graphspace.create')}
-                                    </Button>
-                                </TableHeader>
                                 <Table
                                     columns={columns}
                                     dataSource={data}
+                                    rowKey='name'
                                     pagination={pagination}
                                     onChange={handleTable}
                                 />

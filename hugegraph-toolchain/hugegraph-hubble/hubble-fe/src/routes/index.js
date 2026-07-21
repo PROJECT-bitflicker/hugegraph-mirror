@@ -32,6 +32,12 @@ import Account from '../pages/Account';
 import Navigation from '../pages/Navigation';
 import Error404 from '../pages/Error404';
 import Test from '../pages/Test';
+import OperationsOverview from '../pages/Operations/Overview';
+import OperationsNodes from '../pages/Operations/Nodes';
+import OperationsNodeDetail from '../pages/Operations/NodeDetail';
+import OperationsRoute, {
+    OperationsOverviewRoute,
+} from '../pages/Operations/OperationsRoute';
 
 // 图分析的路由
 import GraphAnalysis from '../pages/GraphAnalysis';
@@ -42,7 +48,9 @@ import {
     shouldUseNonPdDefaultGraphspace,
 } from '../utils/productMode';
 import * as user from '../utils/user';
+import {isDevelopmentBuild} from '../utils/routeEnvironment';
 import RouteErrorBoundary from '../components/RouteErrorBoundary';
+import {useAuthContext} from '../auth/AuthContext';
 
 const LOGIN_PATH = '/login';
 
@@ -67,14 +75,41 @@ const ProtectedRoute = ({children}) => {
     return <Navigate to={`${LOGIN_PATH}?redirect=${encodeURIComponent(redirect)}`} replace />;
 };
 
-const PdOnlyRoute = ({children, fallback = '/navigation'}) => {
-    return isPdEnabled() ? children : <Navigate to={fallback} replace />;
+const AccountRoute = () => {
+    const {loading, hasCapability} = useAuthContext();
+
+    if (loading) {
+        return null;
+    }
+
+    return hasCapability('accounts_manage')
+        || hasCapability('graphspace_members_manage')
+        ? <Account />
+        : <Navigate to='/profile' replace />;
 };
 
 const GraphSpaceListRoute = () => {
-    return isPdEnabled()
-        ? <GraphSpace />
-        : <Navigate to={`/graphspace/${DEFAULT_GRAPHSPACE}`} replace />;
+    const {loading, hasCapability} = useAuthContext();
+
+    if (!isPdEnabled()) {
+        return <Navigate to={`/graphspace/${DEFAULT_GRAPHSPACE}`} replace />;
+    }
+    if (loading) {
+        return null;
+    }
+    return hasCapability('graphspaces_read')
+        ? <GraphSpace /> : <Navigate to='/profile' replace />;
+};
+
+const LegacyProfileRedirect = () => {
+    const location = useLocation();
+
+    return (
+        <Navigate
+            to={{pathname: '/profile', search: location.search, hash: location.hash}}
+            replace
+        />
+    );
 };
 
 const GraphRoute = () => {
@@ -115,9 +150,11 @@ const RouteList = ({element}) => {
                 <Route
                     path="/graphspace/:graphspace/schema"
                     element={(
-                        <PdOnlyRoute fallback={`/graphspace/${DEFAULT_GRAPHSPACE}`}>
+                        <GraphspaceParamRoute
+                            fallback={`/graphspace/${DEFAULT_GRAPHSPACE}/schema`}
+                        >
                             <Schema />
-                        </PdOnlyRoute>
+                        </GraphspaceParamRoute>
                     )}
                 />
                 <Route path="/graphspace/:graphspace" element={<GraphRoute />} />
@@ -143,19 +180,42 @@ const RouteList = ({element}) => {
                 <Route path="/task/edit" element={<TaskEdit />} />
                 <Route path="/task/detail/:taskid" element={<TaskDetail />} />
 
-                <Route path='/my' element={<My />} />
+                <Route path='/profile' element={<My />} />
+                <Route path='/my' element={<LegacyProfileRedirect />} />
                 <Route path='/resource' element={<Navigate to='/navigation' replace />} />
                 <Route path='/role' element={<Navigate to='/navigation' replace />} />
                 <Route
                     path='/account'
-                    element={<PdOnlyRoute fallback='/my'><Account /></PdOnlyRoute>}
+                    element={<AccountRoute />}
                 />
-                {/* <Route path='/role' element={<Role />} /> */}
                 <Route
                     path='/role/graphspace/:graphspace/:role'
                     element={<Navigate to='/navigation' replace />}
                 />
-                {/* <Route path='/resource' element={<Resource />} /> */}
+                <Route
+                    path='/operations/overview'
+                    element={(
+                        <OperationsOverviewRoute>
+                            <OperationsOverview />
+                        </OperationsOverviewRoute>
+                    )}
+                />
+                <Route
+                    path='/operations/nodes'
+                    element={(
+                        <OperationsRoute required='operations_topology_read'>
+                            <OperationsNodes />
+                        </OperationsRoute>
+                    )}
+                />
+                <Route
+                    path='/operations/nodes/:nodeId'
+                    element={(
+                        <OperationsRoute required='operations_topology_read'>
+                            <OperationsNodeDetail />
+                        </OperationsRoute>
+                    )}
+                />
                 {/* <Route path="/:moduleName" element={<GraphAnalysis />} /> */}
                 <Route path="/gremlin" element={<GraphAnalysis moduleName={'gremlin'} />} />
                 <Route path="/algorithms" element={<GraphAnalysis moduleName={'algorithms'} />} />
@@ -204,7 +264,9 @@ const RouteList = ({element}) => {
             </Route>
 
 
-            <Route path="/test" element={<Test />} />
+            {isDevelopmentBuild(process.env.NODE_ENV) && (
+                <Route path="/test" element={<Test />} />
+            )}
         </Routes>
     );
 };

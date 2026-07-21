@@ -43,6 +43,7 @@ const OlapFormHome = props => {
         search,
         currentAlgorithm,
         updateCurrentAlgorithm,
+        canRunLouvain,
     } =  props;
     const {ALGORITHM_NAME, ALGORITHM_MODE} = useTranslatedConstants();
     const {t} = useTranslation();
@@ -104,10 +105,32 @@ const OlapFormHome = props => {
     };
 
     const olapList = isVermeer ? olapVermeerList : olapComputeList;
+    const olapGroups = [
+        {
+            key: 'importance',
+            items: [PAGE_RANK, PERSONAL_PAGE_RANK, DEGREE_CENTRALIT,
+                CLOSENESS_CENTRALITY, BETWEENNESS_CENTRALITY],
+        },
+        {
+            key: 'communities',
+            items: [WEAKLY_CONNECTED_COMPONENT, LABEL_PROPAGATION_ALGORITHM,
+                LOUVAIN, K_CORE],
+        },
+        {
+            key: 'structure',
+            items: [TRIANGLE_COUNT, RINGS_DETECTION, FILTERED_RINGS_DETECTION,
+                LINKS, CLUSTER_COEFFICIENT, FILTER_SUBGRAPH_MATCHING, SSSP],
+        },
+    ];
 
     // 筛选显示已搜索到的算法
-    const basicOlapList = getSearchedList(olapList, search);
-    const isEmptyBasicOlap = _.isEmpty(basicOlapList);
+    const visibleGroups = olapGroups.map(group => ({
+        ...group,
+        items: getSearchedList(
+            group.items.filter(item => olapList.includes(item)), search
+        ),
+    })).filter(group => !_.isEmpty(group.items));
+    const isEmptyBasicOlap = _.isEmpty(visibleGroups);
     const shouldDisableForm = isVermeer && graphStatus !== GRAPH_LOAD_STATUS.LOADED;
 
     return (
@@ -117,10 +140,13 @@ const OlapFormHome = props => {
                     <div className={c.algorithmCatagery}>{OLAP}</div>
                 </Tooltip>
             )}
-            <Collapse ghost accordion className={c.sideBarCollapse}>
-                {
-                    basicOlapList.map(item =>
-                        (
+            {visibleGroups.map(group => (
+                <div key={group.key}>
+                    <div className={c.algorithmGoal}>
+                        {t(`analysis.algorithm.group.${group.key}`)}
+                    </div>
+                    <Collapse ghost accordion className={c.sideBarCollapse}>
+                        {group.items.map(item => (
                             <OlapItem
                                 key={item}
                                 handleFormSubmit={onOlapFormSubmit}
@@ -128,11 +154,12 @@ const OlapFormHome = props => {
                                 searchValue={search}
                                 currentAlgorithm={currentAlgorithm}
                                 updateCurrentAlgorithm={updateCurrentAlgorithm}
+                                canRunLouvain={canRunLouvain}
                             />
-                        )
-                    )
-                }
-            </Collapse>
+                        ))}
+                    </Collapse>
+                </div>
+            ))}
         </div>
     );
 };

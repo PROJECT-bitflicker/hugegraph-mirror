@@ -16,33 +16,36 @@
  * under the License.
  */
 
-import {Layout, Space, Avatar, Dropdown, message, Modal, Select} from 'antd';
-import {UserOutlined} from '@ant-design/icons';
+import {Layout, Avatar, Button, Dropdown, message} from 'antd';
+import {QuestionCircleOutlined, UserOutlined} from '@ant-design/icons';
 import style from './index.module.scss';
-import Logo from '../../assets/logo.png';
-import {useNavigate, useLocation} from 'react-router-dom';
+import BrandLockup from '../BrandLockup';
+import {Link, useLocation} from 'react-router-dom';
 import * as api from '../../api/index';
 import * as user from '../../utils/user';
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect} from 'react';
 import {useTranslation} from 'react-i18next';
-
-const {Option} = Select;
+import GraphContextSwitcher from '../GraphContextSwitcher';
+import LanguageToggle from '../LanguageToggle';
+import {TopbarPageContextHost} from './PageContextSlot';
+import {
+    clearPersistedAlgorithmFormsForUser,
+} from '../../modules/algorithm/algorithmsForm/algorithmFormPersistence';
+import {useAuthContext} from '../../auth/AuthContext';
 
 const Topbar = () => {
     const userInfo = user.getUser();
-    const navigate = useNavigate();
     const location = useLocation();
     const {t} = useTranslation();
-    const [languageType, setLanguageType] = useState(
-        localStorage.getItem('languageType') || 'zh-CN'
-    );
+    const {context: authContext} = useAuthContext();
 
     const redirectToLogin = useCallback(() => {
-        const redirect = `${location.pathname}${location.search}`;
+        const redirect = `${location.pathname}${location.search}${location.hash}`;
+        clearPersistedAlgorithmFormsForUser();
         user.clearLogin();
         sessionStorage.setItem('redirect', redirect);
         window.location.href = `/login?redirect=${encodeURIComponent(redirect)}`;
-    }, [location.pathname, location.search]);
+    }, [location.hash, location.pathname, location.search]);
 
     useEffect(() => {
         let cancelled = false;
@@ -70,10 +73,8 @@ const Topbar = () => {
         redirectToLogin();
     }
 
-    const i18Change = useCallback(e => {
-        localStorage.setItem('languageType', e);
-        setLanguageType(e);
-        window.location.reload();
+    const showShortcutHelp = useCallback(() => {
+        window.dispatchEvent(new CustomEvent('hubble:shortcut-help'));
     }, []);
 
     const logout = useCallback(() => {
@@ -81,48 +82,79 @@ const Topbar = () => {
         api.auth.logout().then(res => {
             if (res.status === 200) {
                 sessionStorage.removeItem('redirect');
+                clearPersistedAlgorithmFormsForUser();
                 user.clearLogin();
                 message.success(t('Topbar.exit.success'));
-                navigate('/login');
+                window.location.replace('/login');
             }
         });
-    }, [navigate, t]);
-
-    const confirm = useCallback(() => {
-        Modal.confirm({
-            title: t('Topbar.exit.confirm'),
-            okText: t('common.verify.ok'),
-            cancelText: t('common.verify.cancel'),
-            onOk: logout,
-        });
-    }, [logout, t]);
+    }, [t]);
 
     const userMenu = {
-        items: [{
-            key: 'logout',
-            label: t('Topbar.exit.name'),
-        }],
-        onClick: confirm,
+        items: [
+            {
+                key: 'profile',
+                label: <Link to='/profile'>{t('workbench.page.profile')}</Link>,
+            },
+            {
+                key: 'logout',
+                label: t('Topbar.exit.name'),
+            },
+        ],
+        onClick: ({key}) => {
+            if (key === 'logout') {
+                logout();
+            }
+        },
     };
+    const userLabel = userInfo?.user_nickname ?? userInfo?.user_name ?? (
+        authContext?.role === 'SUPERADMIN' ? t('Topbar.super_admin') : ''
+    );
+    const userCharacters = Array.from(userLabel);
+    const avatarLabel = userCharacters.length > 1
+        ? `${userCharacters[0]}${userCharacters[userCharacters.length - 1]}`
+        : userLabel;
 
     return (
-        <Layout.Header>
-            <div className={style.logo}><img src={Logo} alt='' /></div>
-            <div className={style.rightContainer}>
-                <Select
-                    value={languageType}
-                    style={{width: 120}}
-                    size="small"
-                    onChange={i18Change}
+        <Layout.Header className={`${style.header} workbench-topbar`}>
+            <div className={style.leftContainer}>
+                <Link
+                    className={style.logo}
+                    to='/navigation'
+                    aria-label={t('workbench.back_home')}
                 >
-                    <Option value="zh-CN">中文</Option>
-                    <Option value="en-US">English</Option>
-                </Select>
-                <Dropdown menu={userMenu}>
-                    <Space className={style.right}>
-                        <Avatar size={'small'} icon={<UserOutlined />} />
-                        <span>{userInfo?.user_nickname ?? ''}</span>
-                    </Space>
+                    <BrandLockup compact />
+                </Link>
+                <GraphContextSwitcher />
+            </div>
+            <TopbarPageContextHost className={style.pageContext} />
+            <div className={style.rightContainer}>
+                <LanguageToggle tone='dark' />
+                <Button
+                    type='text'
+                    className={style.shortcutHelp}
+                    icon={<QuestionCircleOutlined />}
+                    aria-label={t('workbench.shortcuts.open_button')}
+                    title={t('workbench.shortcuts.open_button')}
+                    onClick={showShortcutHelp}
+                />
+                <Dropdown menu={userMenu} trigger={['click']}>
+                    <Button
+                        type='text'
+                        className={`${style.right} ${style.userMenuTrigger}`}
+                        aria-label={t('Topbar.user_menu', {name: userLabel})}
+                        aria-haspopup='menu'
+                        title={userLabel}
+                    >
+                        <Avatar
+                            size={'small'}
+                            icon={avatarLabel ? undefined : <UserOutlined />}
+                            aria-label={userLabel}
+                            title={userLabel}
+                        >
+                            {avatarLabel}
+                        </Avatar>
+                    </Button>
                 </Dropdown>
             </div>
         </Layout.Header>

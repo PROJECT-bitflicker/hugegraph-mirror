@@ -20,7 +20,7 @@
  * @file 图分析画布 Home
  */
 
-import React, {useCallback, useEffect, useState, useContext, useRef} from 'react';
+import React, {useCallback, useEffect, useState, useContext, useMemo, useRef} from 'react';
 import {useTranslation} from 'react-i18next';
 import GraphAnalysisContext from '../../../../Context';
 import Graph from '../../../../component/Graph';
@@ -46,6 +46,12 @@ import {GRAPH_STATUS, PANEL_TYPE, GRAPH_RENDER_MODE} from '../../../../../utils/
 import {formatToGraphData, formatToLegendData, formatToDownloadData,
     formatToStyleData, updateGraphDataStyle} from '../../../../../utils/formatGraphResultData';
 import {mapLayoutNameToLayoutDetails} from '../../../../../utils/graph';
+import {
+    disableChangeDataRelayout,
+    shouldKeepGraphCanvas,
+} from '../../../../component/Graph/data';
+import {nextResultRevision} from './data';
+import {getQueryResultStandbyMessage} from '../../Home/utils';
 import {fetchExpandInfo, handleAddGraphNode, handleAddGraphEdge, handleExpandGraph} from '../utils';
 import {filterData} from '../../../../../utils/filter';
 import c from './index.module.scss';
@@ -81,6 +87,8 @@ const GraphResult = props => {
     const graphSpaceInfo = useContext(GraphAnalysisContext);
 
     const [graphData, setGraphData] = useState({nodes: [], edges: []});
+    const [resultRevision, setResultRevision] = useState(0);
+    const queryResultRef = useRef(data);
     const [legendData, setLegendData] = useState();
     const [styleConfigData, setStyleConfigData] = useState({nodes: {}, edges: {}});
     const [showEditElement, setShowEditElement] = useState(false);
@@ -95,11 +103,21 @@ const GraphResult = props => {
     const [graphAllInfo, setGraphAllInfo] = useState();
     const [graph, setGraph] = useState();
     const showCanvasInfo =  (_.size(data.vertices) !== 0 || _.size(data.edges) !== 0) && queryStatus === SUCCESS;
+    const defaultLayout = useMemo(
+        () => ({layout: 'force', nodeCount: graphData.nodes.length}),
+        [graphData.nodes.length]
+    );
 
     useEffect(
         () => {
             const graphData = formatToGraphData(data, metaData, {});
             setGraphData(graphData);
+            setResultRevision(revision => nextResultRevision(
+                queryResultRef.current,
+                data,
+                revision
+            ));
+            queryResultRef.current = data;
         },
         [data, metaData]
     );
@@ -168,7 +186,12 @@ const GraphResult = props => {
     const handleLayoutChange = useCallback(
         layout => {
             graph.destroyLayout();
-            graph.updateLayout(layout, 'center', undefined, false);
+            graph.updateLayout(
+                disableChangeDataRelayout(layout),
+                'center',
+                undefined,
+                false
+            );
         },
         [graph]
     );
@@ -432,7 +455,8 @@ const GraphResult = props => {
     const renderCanvas2D = () => (
         <Graph
             data={graphData}
-            layout={'force'}
+            layout={defaultLayout}
+            layoutRevision={resultRevision}
             onGraphRender={onGraphRender}
             onNodeClick={handleClickGraphNode}
             onEdgeClick={handleClickGraphEdge}
@@ -508,9 +532,15 @@ const GraphResult = props => {
         switch (queryStatus) {
             case STANDBY:
                 return (
-                    <GraphStatusView status={STANDBY} message={t('analysis.query_result.no_data')} />
+                    <GraphStatusView
+                        status={STANDBY}
+                        message={getQueryResultStandbyMessage(t, isQueryMode)}
+                    />
                 );
             case LOADING:
+                if (shouldKeepGraphCanvas(isQueryMode, queryStatus, graphData)) {
+                    return graphRenderMode === CANVAS2D ? renderCanvas2D() : renderCanvas3D();
+                }
                 return (
                     <GraphStatusView
                         status={LOADING}

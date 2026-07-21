@@ -56,17 +56,38 @@ public class AccessService extends AuthService {
         if (access == null) {
             throw new ExternalException("auth.access.not-exist.id", accessId);
         }
-        Group group = RoleService.getGroup(client.auth(),
-                                           access.group().toString());
-        Target target = this.targetService.get(client,
+        requireGraphSpace(graphSpace, access.graphSpace(), "access");
+        Group group = graphSpace == null ?
+                      RoleService.getGroup(client.auth(),
+                                           access.group().toString()) :
+                      RoleService.requireScopedGroup(
+                              client.auth(), graphSpace,
+                              access.group().toString());
+        Target target = graphSpace == null ?
+                        this.targetService.get(client,
+                                               access.target().toString()) :
+                        this.targetService.get(client, graphSpace,
                                                access.target().toString());
         return convert(graphSpace, access, group, target);
     }
 
     private List<Access> list0(HugeClient client, String roleId,
                                String targetId) {
+        return this.list0(client, null, roleId, targetId, false);
+    }
+
+    private List<Access> list0(HugeClient client, String graphSpace,
+                               String roleId, String targetId,
+                               boolean strict) {
         List<Access> result = new ArrayList<>();
         client.auth().listAccessesByGroup(roleId, -1).forEach(access -> {
+            if (!belongsToGraphSpace(graphSpace, access.graphSpace())) {
+                if (strict) {
+                    requireGraphSpace(graphSpace, access.graphSpace(),
+                                      "access");
+                }
+                return;
+            }
             if (targetId == null ||
                 access.target().toString().equals(targetId)) {
                 result.add(access);
@@ -83,19 +104,31 @@ public class AccessService extends AuthService {
     public List<AccessEntity> list(HugeClient client, String graphSpace,
                                    String roleId, String targetId) {
         List<AccessEntity> result = new ArrayList<>();
-        List<Access> accesses = this.list0(client, roleId, targetId);
+        List<Access> accesses = this.list0(client, graphSpace, roleId,
+                                           targetId, false);
         Multimap<ImmutableList<String>, Access> grouped =
                 ArrayListMultimap.create();
 
         accesses.forEach(access -> {
+            if (access.group() == null || access.target() == null ||
+                graphSpace != null && RoleService.isPdDefaultRoleId(
+                        access.group().toString())) {
+                return;
+            }
             grouped.put(ImmutableList.of(access.group().toString(),
                                          access.target().toString()), access);
         });
 
         for (ImmutableList<String> key : grouped.keySet()) {
             try {
-                Group group = RoleService.getGroup(client.auth(), key.get(0));
-                Target target = this.targetService.get(client, key.get(1));
+                Group group = graphSpace == null ?
+                              RoleService.getGroup(client.auth(), key.get(0)) :
+                              RoleService.requireScopedGroup(
+                                      client.auth(), graphSpace, key.get(0));
+                Target target = graphSpace == null ?
+                                this.targetService.get(client, key.get(1)) :
+                                this.targetService.get(client, graphSpace,
+                                                       key.get(1));
                 result.add(convert(graphSpace, grouped.get(key), group,
                                    target));
             } catch (Exception e) {
@@ -112,8 +145,20 @@ public class AccessService extends AuthService {
 
     public AccessEntity addOrUpdate(HugeClient client, String graphSpace,
                                     AccessEntity accessEntity) {
-        List<Access> accesses = this.list0(client, accessEntity.getRoleId(),
-                                           accessEntity.getTargetId());
+        if (accessEntity.getGraphSpace() != null) {
+            requireGraphSpace(graphSpace, accessEntity.getGraphSpace(),
+                              "access");
+        }
+        accessEntity.setGraphSpace(graphSpace);
+        if (graphSpace != null) {
+            RoleService.requireScopedGroup(client.auth(), graphSpace,
+                                           accessEntity.getRoleId());
+            this.targetService.get(client, graphSpace,
+                                   accessEntity.getTargetId());
+        }
+        List<Access> accesses = this.list0(client, graphSpace,
+                                           accessEntity.getRoleId(),
+                                           accessEntity.getTargetId(), true);
         Set<HugePermission> currentPermissions =
                 accesses.stream().map(Access::permission)
                         .collect(Collectors.toSet());
@@ -127,6 +172,7 @@ public class AccessService extends AuthService {
         accessEntity.getPermissions().forEach(permission -> {
             if (!currentPermissions.contains(permission)) {
                 Access access = new Access();
+                access.graphSpace(graphSpace);
                 access.group(accessEntity.getRoleId());
                 access.target(accessEntity.getTargetId());
                 access.permission(permission);
@@ -149,6 +195,14 @@ public class AccessService extends AuthService {
         });
     }
 
+    public void delete(HugeClient client, String graphSpace, String roleId,
+                       String targetId) {
+        RoleService.requireScopedGroup(client.auth(), graphSpace, roleId);
+        this.targetService.get(client, graphSpace, targetId);
+        this.list0(client, graphSpace, roleId, targetId, true)
+            .forEach(access -> client.auth().deleteAccess(access.id()));
+    }
+
     protected AccessEntity convert(Access access, Group group, Target target) {
         return this.convert(null, access, group, target);
     }
@@ -158,7 +212,7 @@ public class AccessService extends AuthService {
         AccessEntity entity = new AccessEntity(target.id().toString(),
                                                target.name(),
                                                group.id().toString(),
-                                               group.name(),
+                                               RoleService.displayName(group),
                                                firstNonNull(graphSpace,
                                                             access.graphSpace(),
                                                             target.graphSpace()),
@@ -181,7 +235,7 @@ public class AccessService extends AuthService {
         AccessEntity entity = new AccessEntity(target.id().toString(),
                                                target.name(),
                                                group.id().toString(),
-                                               group.name(),
+                                               RoleService.displayName(group),
                                                firstNonNull(graphSpace,
                                                             target.graphSpace()),
                                                target.graph(),

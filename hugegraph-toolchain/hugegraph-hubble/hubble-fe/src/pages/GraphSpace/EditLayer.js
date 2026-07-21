@@ -16,18 +16,33 @@
  * under the License.
  */
 
-import {Modal, Form, Input, Select, message, Switch, InputNumber, Space, Typography} from 'antd';
+import {
+    Modal,
+    Form,
+    Input,
+    Select,
+    message,
+    Switch,
+    InputNumber,
+    Space,
+    Typography,
+} from 'antd';
 import {useState, useEffect, useMemo, useCallback} from 'react';
 import {useTranslation} from 'react-i18next';
 import * as api from '../../api/index';
-import * as rules from '../../utils/rules';
+import FormHelpLabel from '../../components/FormHelpLabel';
+import {getResourceAlias} from '../../utils/displayName';
 
 const {Option} = Select;
 const PAGE_ERROR_CONFIG = {suppressBusinessErrorToast: true};
-
-const MyFormItem = ({label, unit, children}) => {
+// Keep this validation aligned with Server GraphManager.checkNickname().
+const GRAPHSPACE_NICKNAME_PATTERN = new RegExp(
+    '^[a-zA-Z\\u4E00-\\u9FA5]'
+    + '[a-zA-Z0-9\\u4E00-\\u9FA5~!@#$%^&*()_+|<>,.?/:;\'`"\\[\\]{}\\\\]{0,47}$'
+);
+const MyFormItem = ({label, help, unit, children}) => {
     return (
-        <Form.Item label={label} colon={false} required>
+        <Form.Item label={<FormHelpLabel label={label} help={help} />} colon={false}>
             <Space>
                 {children}
                 <span className='spanFontSize'>{unit}</span>
@@ -43,14 +58,14 @@ const EditLayer = ({visible, detail, onCancel, refresh}) => {
     const {t} = useTranslation();
 
     const defaultValues = {
-        max_graph_number: 100,
-        max_role_number: 100,
-        cpu_limit: 100,
-        compute_cpu_limit: 100,
-        memory_limit: 1000,
-        compute_memory_limit: 1000,
-        storage_limit: 1000000,
+        auth: false,
         description: '',
+        max_graph_number: 100,
+        cpu_limit: 64,
+        memory_limit: 128,
+        compute_cpu_limit: 64,
+        compute_memory_limit: 128,
+        storage_limit: 1000000,
     };
 
     const isDisabled = useMemo(() => {
@@ -87,6 +102,10 @@ const EditLayer = ({visible, detail, onCancel, refresh}) => {
                 api.manage.addGraphSpace(values, PAGE_ERROR_CONFIG)
                     .then(thenCallBack).catch(catchCallback);
             }
+        }).catch(error => {
+            if (!error?.errorFields) {
+                message.error(t('common.msg.operation_failed'));
+            }
         });
     }, [detail.name, isDisabled, onCancel, refresh, form, t]);
 
@@ -109,6 +128,16 @@ const EditLayer = ({visible, detail, onCancel, refresh}) => {
         }
 
         return Promise.resolve();
+    };
+
+    const nicknameValidator = (_, value) => {
+        if (!value) {
+            return Promise.resolve();
+        }
+        const valid = GRAPHSPACE_NICKNAME_PATTERN.test(value);
+        return valid
+            ? Promise.resolve()
+            : Promise.reject(t('graphspace.form.name_rule'));
     };
 
     const userSelect = useMemo(
@@ -135,6 +164,7 @@ const EditLayer = ({visible, detail, onCancel, refresh}) => {
                 if (res.status === 200) {
                     form.setFieldsValue({
                         ...res.data,
+                        nickname: getResourceAlias(res.data.name, res.data.nickname),
                         algorithm_image_url: res.data.algorithm_image_url
                                              || res.data['internal_'
                                                          + 'algorithm_image_url'],
@@ -156,13 +186,16 @@ const EditLayer = ({visible, detail, onCancel, refresh}) => {
                 : 'common.action.save')}
             loading={loading}
             onOk={onFinish}
-            width={600}
+            width={680}
             destroyOnClose
             maskClosable={false}
             // forceRender
         >
             <Form
-                labelCol={{span: 6}}
+                className="graphspace-edit-form"
+                labelCol={{flex: '200px'}}
+                wrapperCol={{flex: '1 1 0'}}
+                labelWrap
                 form={form}
                 name="control-hooks"
                 // onFinish={onFinish}
@@ -172,181 +205,222 @@ const EditLayer = ({visible, detail, onCancel, refresh}) => {
 
                 <Form.Item
                     name="name"
-                    label={t('graphspace.form.id')}
-                    rules={
-                        [
-                            {required: true, message: t('common.form.required')},
-                            {max: 48, message: t('common.form.max_48')},
-                            {validator: serviceValidator},
-                        ]
-                    }
+                    label={<FormHelpLabel
+                        label={t('graphspace.form.id')}
+                        help={t('graphspace.form.id_help')}
+                    />}
+                    rules={[
+                        {required: true, message: t('common.form.required')},
+                        {max: 48, message: t('common.form.max_48')},
+                        {validator: serviceValidator},
+                    ]}
                 >
-                    <Input disabled={isDisabled} placeholder={t('graphspace.form.id_placeholder')} />
+                    <Input
+                        disabled={isDisabled}
+                        placeholder={t('graphspace.form.id_placeholder')}
+                    />
                 </Form.Item>
 
                 <Form.Item
                     name="nickname"
-                    label={t('graphspace.form.name')}
-                    rules={
-                        [
-                            {required: true, message: t('common.form.required')},
-                            {max: 12, message: t('common.form.max_12')},
-                            rules.isPropertyName,
-                        ]
-                    }
+                    label={<FormHelpLabel
+                        label={t('graphspace.form.name')}
+                        help={t('graphspace.form.name_help')}
+                    />}
+                    rules={[
+                        {max: 48, message: t('common.form.max_48')},
+                        {validator: nicknameValidator},
+                    ]}
                 >
                     <Input placeholder={t('graphspace.form.name_placeholder')} />
                 </Form.Item>
 
                 <Form.Item
-                    label={t('graphspace.form.auth')}
+                    label={<FormHelpLabel
+                        label={t('graphspace.form.auth')}
+                        help={t('graphspace.form.auth_help')}
+                    />}
                     name="auth"
                     valuePropName="checked"
                 >
-                    <Switch disabled={isDisabled} />
+                    <Switch
+                        aria-label={t('graphspace.form.auth')}
+                        disabled={isDisabled}
+                    />
                 </Form.Item>
 
                 <Form.Item
                     name="max_graph_number"
-                    label={t('graphspace.form.max_graph')}
-                    rules={
-                        [
-                            {required: true, message: t('common.form.required')},
-                        ]
-                    }
+                    label={<FormHelpLabel
+                        label={t('graphspace.form.max_graph')}
+                        help={t('graphspace.form.max_graph_help')}
+                    />}
                 >
-                    <InputNumber precision={0} min={1} />
+                    <InputNumber
+                        precision={0}
+                        min={1}
+                        placeholder={t('graphspace.form.max_graph_placeholder')}
+                    />
                 </Form.Item>
 
-                <Typography.Title level={5}>{t('graphspace.form.graph_service')}</Typography.Title>
-                <MyFormItem label={t('graphspace.form.cpu')} unit={t('graphspace.unit.cpu')}>
+                <details style={{marginBottom: 24}}>
+                    <summary style={{cursor: 'pointer', marginBottom: 16}}>
+                        <strong>{t('graphspace.form.advanced_title')}</strong>
+                        <Typography.Text type='secondary' style={{marginLeft: 8}}>
+                            {t('graphspace.form.advanced_help')}
+                        </Typography.Text>
+                    </summary>
+
+                    <Typography.Title level={5}>
+                        {t('graphspace.form.graph_service')}
+                    </Typography.Title>
+                    <MyFormItem
+                        label={t('graphspace.form.cpu')}
+                        help={t('graphspace.form.graph_cpu_help')}
+                        unit={t('graphspace.unit.cpu')}
+                    >
+                        <Form.Item
+                            name="cpu_limit"
+                            noStyle
+                        >
+                            <InputNumber
+                                placeholder={t('graphspace.form.cpu_placeholder')}
+                                precision={0}
+                                min={1}
+                            />
+                        </Form.Item>
+                    </MyFormItem>
+
+                    <MyFormItem
+                        label={t('graphspace.form.memory')}
+                        help={t('graphspace.form.graph_memory_help')}
+                        unit={t('graphspace.unit.memory')}
+                    >
+                        <Form.Item
+                            name="memory_limit"
+                            noStyle
+                        >
+                            <InputNumber
+                                placeholder={t('graphspace.form.memory_placeholder')}
+                                precision={0}
+                                min={1}
+                            />
+                        </Form.Item>
+                    </MyFormItem>
+
                     <Form.Item
-                        name="cpu_limit"
-                        noStyle
+                        name="oltp_namespace"
+                        label={<FormHelpLabel
+                            label={t('graphspace.form.k8s_namespace')}
+                            help={t('graphspace.form.oltp_namespace_help')}
+                        />}
                         rules={
                             [
-                                {required: true, message: t('common.form.required')},
+                                {validator: k8sValidator},
                             ]
                         }
                     >
-                        <InputNumber placeholder={t('graphspace.form.cpu_placeholder')} precision={0} min={1} />
+                        <Input disabled={isDisabled} placeholder={t('graphspace.form.k8s_placeholder')} />
                     </Form.Item>
-                </MyFormItem>
 
-                <MyFormItem label={t('graphspace.form.memory')} unit={t('graphspace.unit.memory')}>
+                    <Typography.Title level={5}>{t('graphspace.form.compute_task')}</Typography.Title>
+                    <MyFormItem
+                        label={t('graphspace.form.cpu')}
+                        help={t('graphspace.form.compute_cpu_help')}
+                        unit={t('graphspace.unit.cpu')}
+                    >
+                        <Form.Item
+                            name="compute_cpu_limit"
+                            noStyle
+                        >
+                            <InputNumber
+                                placeholder={t('graphspace.form.cpu_placeholder')}
+                                precision={0}
+                                min={1}
+                            />
+                        </Form.Item>
+                    </MyFormItem>
+
+                    <MyFormItem
+                        label={t('graphspace.form.memory')}
+                        help={t('graphspace.form.compute_memory_help')}
+                        unit={t('graphspace.unit.memory')}
+                    >
+                        <Form.Item
+                            name="compute_memory_limit"
+                            noStyle
+                        >
+                            <InputNumber
+                                placeholder={t('graphspace.form.memory_placeholder')}
+                                precision={0}
+                                min={1}
+                            />
+                        </Form.Item>
+                    </MyFormItem>
+
                     <Form.Item
-                        name="memory_limit"
-                        noStyle
+                        name="olap_namespace"
+                        label={<FormHelpLabel
+                            label={t('graphspace.form.k8s_namespace')}
+                            help={t('graphspace.form.olap_namespace_help')}
+                        />}
                         rules={
                             [
-                                {required: true, message: t('common.form.required')},
+                                {validator: k8sValidator},
                             ]
                         }
                     >
-                        <InputNumber placeholder={t('graphspace.form.memory_placeholder')} precision={0} min={1} />
+                        <Input disabled={isDisabled} placeholder={t('graphspace.form.k8s_placeholder')} />
                     </Form.Item>
-                </MyFormItem>
 
-                <Form.Item
-                    name="oltp_namespace"
-                    label={t('graphspace.form.k8s_namespace')}
-                    rules={
-                        [
-                            {validator: k8sValidator},
-                        ]
-                    }
-                >
-                    <Input disabled={isDisabled} placeholder={t('graphspace.form.k8s_placeholder')} />
-                </Form.Item>
-
-                <Typography.Title level={5}>{t('graphspace.form.compute_task')}</Typography.Title>
-                <MyFormItem label={t('graphspace.form.cpu')} unit={t('graphspace.unit.cpu')}>
                     <Form.Item
-                        name="compute_cpu_limit"
-                        noStyle
-                        rules={
-                            [
-                                {required: true, message: t('common.form.required')},
-                            ]
-                        }
+                        name="operator_image_path"
+                        label={t('graphspace.form.operator_image')}
+                        rules={[
+                            {
+                                pattern: /^[a-zA-Z0-9\-\.]+\/[a-zA-Z0-9\-_]+\/[a-zA-Z0-9\-_]+(\:[a-z0-9\.]+)*$/,
+                                message: t('graphspace.form.image_format_error'),
+                            },
+                        ]}
+                        extra={t('graphspace.form.image_example')}
                     >
-                        <InputNumber placeholder={t('graphspace.form.cpu_placeholder')} precision={0} min={1} />
+                        <Input placeholder={t('graphspace.form.image_placeholder')} />
                     </Form.Item>
-                </MyFormItem>
 
-                <MyFormItem label={t('graphspace.form.memory')} unit={t('graphspace.unit.memory')}>
                     <Form.Item
-                        name="compute_memory_limit"
-                        noStyle
-                        rules={
-                            [
-                                {required: true, message: t('common.form.required')},
-                            ]
-                        }
+                        name="algorithm_image_url"
+                        label={t('graphspace.form.algorithm_image')}
+                        extra={t('graphspace.form.image_example')}
+                        rules={[
+                            {
+                                pattern: /^[a-zA-Z0-9\-\.]+\/[a-zA-Z0-9\-_]+\/[a-zA-Z0-9\-_]+(\:[a-z0-9\.]+)*$/,
+                                message: t('graphspace.form.image_format_error'),
+                            },
+                        ]}
                     >
-                        <InputNumber placeholder={t('graphspace.form.memory_placeholder')} precision={0} min={1} />
+                        <Input placeholder={t('graphspace.form.image_placeholder')} />
                     </Form.Item>
-                </MyFormItem>
 
-                <Form.Item
-                    name="olap_namespace"
-                    label={t('graphspace.form.k8s_namespace')}
-                    rules={
-                        [
-                            {validator: k8sValidator},
-                        ]
-                    }
-                >
-                    <Input disabled={isDisabled} placeholder={t('graphspace.form.k8s_placeholder')} />
-                </Form.Item>
-
-                <Form.Item
-                    name="operator_image_path"
-                    label={t('graphspace.form.operator_image')}
-                    rules={[
-                        {
-                            pattern: /^[a-zA-Z0-9\-\.]+\/[a-zA-Z0-9\-_]+\/[a-zA-Z0-9\-_]+(\:[a-z0-9\.]+)*$/,
-                            message: t('graphspace.form.image_format_error'),
-                        },
-                    ]}
-                    extra='ie: example.com/org_1/xx_img:1.0.0'
-                >
-                    <Input />
-                </Form.Item>
-
-                <Form.Item
-                    name="algorithm_image_url"
-                    label={t('graphspace.form.algorithm_image')}
-                    extra='ie: example.com/org_1/xx_img:1.0.0'
-                    rules={[
-                        {
-                            pattern: /^[a-zA-Z0-9\-\.]+\/[a-zA-Z0-9\-_]+\/[a-zA-Z0-9\-_]+(\:[a-z0-9\.]+)*$/,
-                            message: t('graphspace.form.image_format_error'),
-                        },
-                    ]}
-                >
-                    <Input />
-                </Form.Item>
-
-                <Typography.Title level={5}>{t('graphspace.form.storage')}</Typography.Title>
-                <MyFormItem label={t('graphspace.form.storage_limit')} unit={t('graphspace.unit.memory')}>
-                    <Form.Item
-                        name="storage_limit"
-                        noStyle
-                        rules={
-                            [
-                                {required: true, message: t('common.form.required')},
-                            ]
-                        }
+                    <Typography.Title level={5}>{t('graphspace.form.storage')}</Typography.Title>
+                    <MyFormItem
+                        label={t('graphspace.form.storage_limit')}
+                        help={t('graphspace.form.storage_limit_help')}
+                        unit={t('graphspace.unit.memory')}
                     >
-                        <InputNumber
-                            style={{width: 200}}
-                            placeholder={t('graphspace.form.memory_placeholder')}
-                            precision={0}
-                            min={1}
-                        />
-                    </Form.Item>
-                </MyFormItem>
+                        <Form.Item
+                            name="storage_limit"
+                            noStyle
+                        >
+                            <InputNumber
+                                style={{width: 200}}
+                                placeholder={t('graphspace.form.storage_placeholder')}
+                                precision={0}
+                                min={1}
+                            />
+                        </Form.Item>
+                    </MyFormItem>
+
+                </details>
 
                 <hr />
 

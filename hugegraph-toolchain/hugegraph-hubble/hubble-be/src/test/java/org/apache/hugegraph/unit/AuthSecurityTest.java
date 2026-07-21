@@ -28,8 +28,10 @@ import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
@@ -39,6 +41,7 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.Mockito;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -56,6 +59,8 @@ import org.apache.hugegraph.controller.BaseController;
 import org.apache.hugegraph.controller.auth.LoginController;
 import org.apache.hugegraph.driver.AuthManager;
 import org.apache.hugegraph.driver.HugeClient;
+import org.apache.hugegraph.entity.GraphConnection;
+import org.apache.hugegraph.entity.auth.PasswordEntity;
 import org.apache.hugegraph.entity.auth.UserEntity;
 import org.apache.hugegraph.exception.ExternalException;
 import org.apache.hugegraph.exception.InternalException;
@@ -68,6 +73,7 @@ import org.apache.hugegraph.handler.ExceptionAdvisor;
 import org.apache.hugegraph.handler.LoginInterceptor;
 import org.apache.hugegraph.handler.MessageSourceHandler;
 import org.apache.hugegraph.options.HubbleOptions;
+import org.apache.hugegraph.service.auth.AuthContextService;
 import org.apache.hugegraph.service.auth.LoginAttemptGuard;
 import org.apache.hugegraph.service.auth.UserService;
 import org.apache.hugegraph.structure.auth.Login;
@@ -78,6 +84,38 @@ public class AuthSecurityTest {
     @After
     public void tearDown() {
         RequestContextHolder.resetRequestAttributes();
+    }
+
+    @Test
+    public void testUserPasswordIsWriteOnlyInJson() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        UserEntity user = mapper.readValue(
+                          "{\"user_name\":\"alice\",\"user_password\":\"secret\"}",
+                          UserEntity.class);
+
+        Assert.assertEquals("secret", user.getPassword());
+        String json = mapper.writeValueAsString(user);
+        Assert.assertFalse(json.contains("user_password"));
+        Assert.assertFalse(json.contains("secret"));
+    }
+
+    @Test
+    public void testCredentialDtosDoNotExposeSecretsInLogs() {
+        UserEntity user = new UserEntity();
+        user.setPassword("user-secret-canary");
+        PasswordEntity password = PasswordEntity.builder()
+                                                .username("alice")
+                                                .oldpwd("old-secret-canary")
+                                                .newpwd("new-secret-canary")
+                                                .build();
+        GraphConnection connection = new GraphConnection();
+        connection.setPassword("connection-secret-canary");
+        connection.setToken("token-secret-canary");
+        connection.setTrustStorePassword("trust-secret-canary");
+
+        String diagnostic = user + " " + password + " " + connection;
+
+        Assert.assertFalse(diagnostic.contains("secret-canary"));
     }
 
     @Test
@@ -444,26 +482,7 @@ public class AuthSecurityTest {
     }
 
     @Test
-    public void testCredentialPasswordIsShortLivedAndNotLegacySessionKey() {
-        MockHttpServletRequest request = new MockHttpServletRequest();
-        RequestContextHolder.setRequestAttributes(
-                new ServletRequestAttributes(request));
-        TestBaseController controller = new TestBaseController();
-
-        controller.savePassword("pa");
-
-        Assert.assertEquals("pa", controller.readPassword());
-        Assert.assertNull(request.getSession().getAttribute("password"));
-
-        request.getSession().setAttribute(Constant.CREDENTIAL_EXPIRES_AT_KEY,
-                                          System.currentTimeMillis() - 1L);
-        Assert.assertNull(controller.readPassword());
-        Assert.assertNull(request.getSession().getAttribute(
-                          Constant.CREDENTIAL_PASSWORD_KEY));
-    }
-
-    @Test
-    public void testClearAuthSessionClearsCredentialState() {
+    public void testClearAuthSessionClearsIdentityAndToken() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         RequestContextHolder.setRequestAttributes(
                 new ServletRequestAttributes(request));
@@ -471,16 +490,11 @@ public class AuthSecurityTest {
 
         request.getSession().setAttribute(Constant.TOKEN_KEY, "token");
         request.getSession().setAttribute(Constant.USERNAME_KEY, "admin");
-        controller.savePassword("pa");
 
         controller.clearAuth();
 
         Assert.assertNull(request.getSession().getAttribute(Constant.TOKEN_KEY));
         Assert.assertNull(request.getSession().getAttribute(Constant.USERNAME_KEY));
-        Assert.assertNull(request.getSession().getAttribute(
-                          Constant.CREDENTIAL_PASSWORD_KEY));
-        Assert.assertNull(request.getSession().getAttribute(
-                          Constant.CREDENTIAL_EXPIRES_AT_KEY));
     }
 
     @Test
@@ -550,6 +564,34 @@ public class AuthSecurityTest {
                             Constant.USERNAME_KEY));
         Assert.assertEquals("server-token", request.getSession().getAttribute(
                             Constant.TOKEN_KEY));
+        Assert.assertNull(request.getSession().getAttribute("auth_password"));
+        Assert.assertNull(request.getSession().getAttribute(
+                          "auth_password_expire_at"));
+    }
+
+    @Test
+    public void testAuthContextUsesCurrentSessionIdentity() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession().setAttribute(Constant.USERNAME_KEY, "alice");
+        request.getSession().setAttribute(Constant.TOKEN_KEY, "server-token");
+        HugeClient client = Mockito.mock(HugeClient.class);
+        request.setAttribute("hugeClient", client);
+        RequestContextHolder.setRequestAttributes(
+                new ServletRequestAttributes(request));
+        TestLoginController controller = new TestLoginController();
+        AuthContextService contexts = Mockito.mock(AuthContextService.class);
+        Map<String, Object> expected = Map.of("role", "USER");
+        Mockito.when(contexts.context(client, "alice")).thenReturn(expected);
+        setField(controller, "authContextService", contexts);
+
+        ResponseEntity<Object> actual = controller.context();
+
+        Assert.assertSame(expected, actual.getBody());
+        Assert.assertEquals("no-store", actual.getHeaders()
+                                             .getCacheControl());
+        Assert.assertEquals("no-cache", actual.getHeaders()
+                                             .getPragma());
+        Mockito.verify(contexts).context(client, "alice");
     }
 
     @Test
@@ -576,7 +618,7 @@ public class AuthSecurityTest {
         controller.userClient = userClient;
         UserService users = Mockito.mock(UserService.class);
         UserEntity entity = new UserEntity();
-        Mockito.when(users.getUser(userClient, "admin")).thenReturn(entity);
+        Mockito.when(users.getpersonal(userClient, "admin")).thenReturn(entity);
         ReflectionTestUtils.setField(controller, "userService", users);
         Login login = new Login();
         login.name("admin");
@@ -641,7 +683,7 @@ public class AuthSecurityTest {
         controller.loginClient = loginClient;
         controller.userClient = userClient;
         UserService users = Mockito.mock(UserService.class);
-        Mockito.when(users.getUser(userClient, "admin"))
+        Mockito.when(users.getpersonal(userClient, "admin"))
                .thenThrow(new ExternalException(HttpStatus.UNAUTHORIZED.value(),
                                                 "expected validation failure"));
         ReflectionTestUtils.setField(controller, "userService", users);
@@ -695,14 +737,6 @@ public class AuthSecurityTest {
     }
 
     private static class TestBaseController extends BaseController {
-
-        public void savePassword(String password) {
-            this.setCredentialPassword(password);
-        }
-
-        public String readPassword() {
-            return this.getCredentialPassword();
-        }
 
         public void clearAuth() {
             this.clearAuthSession();

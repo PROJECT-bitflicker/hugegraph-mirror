@@ -48,8 +48,10 @@ import org.apache.hugegraph.structure.auth.UserManager;
 
 public class AuthManager {
 
+    private final RestClient client;
     private final TargetAPI targetAPI;
     private final GroupAPI groupAPI;
+    private final GroupAPI graphSpaceGroupAPI;
     private final UserAPI userAPI;
     private final AccessAPI accessAPI;
     private final BelongAPI belongAPI;
@@ -60,8 +62,10 @@ public class AuthManager {
     private final ManagerAPI managerAPI;
 
     public AuthManager(RestClient client, String graphSpace, String graph) {
+        this.client = client;
         this.targetAPI = new TargetAPI(client, graphSpace);
         this.groupAPI = new GroupAPI(client);
+        this.graphSpaceGroupAPI = new GroupAPI(client, graphSpace);
         this.userAPI = new UserAPI(client, graphSpace);
         this.accessAPI = new AccessAPI(client, graphSpace);
         this.projectAPI = new ProjectAPI(client, graphSpace);
@@ -118,6 +122,30 @@ public class AuthManager {
 
     public void deleteGroup(Object id) {
         this.groupAPI.delete(id);
+    }
+
+    public List<Group> listGraphSpaceGroups() {
+        return this.listGraphSpaceGroups(-1);
+    }
+
+    public List<Group> listGraphSpaceGroups(int limit) {
+        return this.graphSpaceGroupAPI.list(limit);
+    }
+
+    public Group getGraphSpaceGroup(Object id) {
+        return this.graphSpaceGroupAPI.get(id);
+    }
+
+    public Group createGraphSpaceGroup(Group group) {
+        return this.graphSpaceGroupAPI.create(group);
+    }
+
+    public Group updateGraphSpaceGroup(Group group) {
+        return this.graphSpaceGroupAPI.update(group);
+    }
+
+    public void deleteGraphSpaceGroup(Object id) {
+        this.graphSpaceGroupAPI.delete(id);
     }
 
     public List<User> listUsers() {
@@ -305,7 +333,15 @@ public class AuthManager {
         userManager.type(HugePermission.SPACE);
         userManager.graphSpace(graphSpace);
         userManager.user(user);
-        return this.managerAPI.create(userManager);
+        return this.managerAPI(graphSpace).create(userManager);
+    }
+
+    public UserManager addSpaceMember(String user, String graphSpace) {
+        UserManager userManager = new UserManager();
+        userManager.type(HugePermission.SPACE_MEMBER);
+        userManager.graphSpace(graphSpace);
+        userManager.user(user);
+        return this.managerAPI(graphSpace).create(userManager);
     }
 
     public void delSuperAdmin(String user) {
@@ -313,11 +349,27 @@ public class AuthManager {
     }
 
     public void delSpaceAdmin(String user, String graphSpace) {
-        this.managerAPI.delete(user, HugePermission.SPACE, graphSpace);
+        this.managerAPI(graphSpace).delete(user, HugePermission.SPACE,
+                                           graphSpace);
+    }
+
+    public void delSpaceMember(String user, String graphSpace) {
+        this.managerAPI(graphSpace).delete(user, HugePermission.SPACE_MEMBER,
+                                           graphSpace);
     }
 
     public List<String> listSpaceAdmin(String graphSpace) {
-        return this.managerAPI.list(HugePermission.SPACE, graphSpace);
+        return this.managerAPI(graphSpace).list(HugePermission.SPACE,
+                                                graphSpace);
+    }
+
+    public List<String> listSpaceMember(String graphSpace) {
+        return this.managerAPI(graphSpace).list(HugePermission.SPACE_MEMBER,
+                                                graphSpace);
+    }
+
+    private ManagerAPI managerAPI(String graphSpace) {
+        return new ManagerAPI(this.client, graphSpace);
     }
 
     public List<String> listSuperAdmin() {
@@ -329,14 +381,17 @@ public class AuthManager {
     }
 
     public boolean isSpaceAdmin(String graphSpace) {
-        return this.managerAPI.checkPermission(HugePermission.SPACE, graphSpace);
+        return this.managerAPI(graphSpace)
+                   .checkPermission(HugePermission.SPACE, graphSpace);
     }
 
     public boolean checkDefaultRole(String graphSpace, String role) {
-        return this.managerAPI.checkDefaultRole(graphSpace, role, "");
+        return this.managerAPI(graphSpace)
+                   .checkDefaultRole(graphSpace, role, "");
     }
 
     public boolean checkDefaultRole(String graphSpace, String role, String graph) {
-        return this.managerAPI.checkDefaultRole(graphSpace, role, graph);
+        return this.managerAPI(graphSpace)
+                   .checkDefaultRole(graphSpace, role, graph);
     }
 }

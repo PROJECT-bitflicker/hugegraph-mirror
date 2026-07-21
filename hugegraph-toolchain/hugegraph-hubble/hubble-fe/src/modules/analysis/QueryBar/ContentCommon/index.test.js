@@ -1,5 +1,4 @@
 /*
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements. See the NOTICE file distributed with this
  * work for additional information regarding copyright ownership. The ASF
@@ -17,11 +16,22 @@
  */
 
 import {fireEvent, render, screen} from '@testing-library/react';
-
 import * as api from '../../../../api/index';
-import GraphAnalysisContext from '../../../Context';
 import ContentCommon from './index';
+import GraphAnalysisContext from '../../../Context';
 
+jest.mock('react-i18next', () => ({
+    initReactI18next: {type: '3rdParty', init: jest.fn()},
+    useTranslation: () => ({t: key => ({
+        'analysis.query.execute_query': 'Run Query',
+        'analysis.query.execute_task': 'Run Task',
+        'analysis.query.execute_mode_immediate': 'Immediate',
+        'analysis.query.execute_mode_async': 'Async',
+        'analysis.query.switch_async_task': 'Switch to Async Task',
+        'analysis.query.switch_immediate_query': 'Switch to Immediate Query',
+        'analysis.query.execute_shortcut': 'Run Query (Ctrl + Enter)',
+    })[key] || key}),
+}));
 jest.mock('../../../../api/index', () => ({
     analysis: {addFavoriate: jest.fn().mockResolvedValue({status: 200})},
 }));
@@ -29,34 +39,80 @@ jest.mock('antd', () => ({
     ...jest.requireActual('antd'),
     message: {success: jest.fn(), error: jest.fn()},
 }));
-jest.mock('react-i18next', () => ({
-    initReactI18next: {type: '3rdParty', init: jest.fn()},
-    useTranslation: () => ({t: key => key}),
-}));
-
-const renderContent = () => render(
-    <GraphAnalysisContext.Provider value={{graphSpace: 'DEFAULT', graph: 'hugegraph'}}>
-        <ContentCommon
-            codeEditorContent='g.V()'
-            setCodeEditorContent={jest.fn()}
-            executeMode='QUERY'
-            onExecuteModeChange={jest.fn()}
-            activeTab='Gremlin'
-            onExecute={jest.fn()}
-            onRefresh={jest.fn()}
-            isEmptyQuery={false}
-            favoriteCardVisible
-            setFavoriteCardVisible={jest.fn()}
-        />
-    </GraphAnalysisContext.Provider>
-);
 
 beforeEach(() => {
     api.analysis.addFavoriate.mockResolvedValue({status: 200});
 });
 
-test('keeps favorite submission disabled until the name is backend-compatible', () => {
+const renderContent = overrides => {
+    const props = {
+        codeEditorContent: 'g.V()',
+        setCodeEditorContent: jest.fn(),
+        executeMode: 'query',
+        onExecuteModeChange: jest.fn(),
+        activeTab: 'Gremlin',
+        onExecute: jest.fn(),
+        onRefresh: jest.fn(),
+        isEmptyQuery: false,
+        isExecuting: false,
+        favoriteCardVisible: false,
+        setFavoriteCardVisible: jest.fn(),
+        ...overrides,
+    };
+    render(
+        <GraphAnalysisContext.Provider value={{graphSpace: 'DEFAULT', graph: 'hugegraph'}}>
+            <ContentCommon {...props} />
+        </GraphAnalysisContext.Provider>
+    );
+    return props;
+};
+
+it('presents mode selection and execution as one action group', () => {
+    const props = renderContent({activeTab: 'Cypher'});
+    fireEvent.click(screen.getByRole('button', {name: /Run Query/}));
+
+    expect(props.onExecute).toHaveBeenCalledTimes(1);
+    expect(props.onExecute).toHaveBeenCalledWith('Cypher');
+    expect(screen.getByRole('button', {name: /Run Query/})).toHaveAttribute(
+        'title', 'Run Query (Ctrl + Enter)'
+    );
+});
+
+it('does not execute while a request is pending', () => {
+    const props = renderContent({isExecuting: true});
+
+    expect(props.onExecute).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', {name: /Run Query/})).toBeDisabled();
+});
+
+it('switches between immediate query and async task with one compact control', () => {
+    const props = renderContent();
+
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name: 'Switch to Async Task'}));
+
+    expect(props.onExecuteModeChange).toHaveBeenCalledWith('task');
+});
+
+it('keeps the keyboard shortcut visible beside the secondary actions', () => {
+    renderContent({shortcutHint: 'Ctrl + Enter to run'});
+
+    expect(screen.getByText('Ctrl + Enter to run')).toBeInTheDocument();
+});
+
+it('places clear before favorite in the secondary action group', () => {
     renderContent();
+
+    const clearButton = screen.getByRole('button', {name: 'common.action.clear'});
+    const favoriteButton = screen.getByRole('button', {
+        name: 'analysis.query.favorite',
+    });
+    expect(clearButton.compareDocumentPosition(favoriteButton))
+        .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+});
+
+it('keeps favorite submission disabled until the name is backend-compatible', () => {
+    renderContent({favoriteCardVisible: true});
     const input = screen.getByPlaceholderText('analysis.query.favorite_name_placeholder');
     const submit = screen.getAllByRole('button', {name: 'analysis.query.favorite'})
         .find(button => button.closest('.ant-popover'));

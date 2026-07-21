@@ -16,6 +16,8 @@
  * under the License.
  */
 
+import {getResourceDisplayName} from './displayName';
+
 const DEFAULT_GRAPHSPACE = 'DEFAULT';
 
 const getGraphspacePath = pdEnabled => (
@@ -42,7 +44,7 @@ const isPdOnlyPath = pathname => {
         || pathname.startsWith('/account')
         || pathname.startsWith('/resource')
         || pathname.startsWith('/role')
-        || /^\/graphspace\/[^/]+\/schema(?:\/|$)/.test(pathname);
+        || pathname.startsWith('/super');
 };
 
 const shouldUseNonPdDefaultGraphspace = (pdEnabled, graphspace) => {
@@ -58,12 +60,12 @@ const getTaskGraphspaceOptions = (pdEnabled, graphspaces = []) => {
     }
 
     return graphspaces.map(item => ({
-        label: item.nickname,
+        label: getResourceDisplayName(item.name, item.nickname),
         value: item.name,
     }));
 };
 
-const isGraphCreateEnabled = pdEnabled => pdEnabled;
+const isGraphCreateEnabled = () => true;
 
 const isGraphDefaultMutationEnabled = pdEnabled => pdEnabled;
 

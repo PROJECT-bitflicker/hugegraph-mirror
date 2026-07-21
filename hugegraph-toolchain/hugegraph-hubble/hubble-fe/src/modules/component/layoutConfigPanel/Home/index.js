@@ -44,7 +44,7 @@ const layoutTypeLabel = (icon, name) => {
     return (
         <div className={c.assetsItem}>
             <div className={c.assetsTitle}>
-                <img className={c.changeLayoutTypeSelectIcon} src={icon}></img>
+                <img className={c.changeLayoutTypeSelectIcon} src={icon} alt='' />
             </div>
             <span style={{marginLeft: '18px'}} className={c.changeLayoutTypeSelectName}>{name}</span>
         </div>
@@ -287,6 +287,7 @@ const LayoutConfigPanel = props => {
             >
                 <Form.Item
                     name='enableLayout'
+                    initialValue
                     label={t('analysis.canvas.layout_panel.enable_layout')}
                     valuePropName='checked'
                     labelCol={{span: 20}}
@@ -302,6 +303,7 @@ const LayoutConfigPanel = props => {
                     className={c.layoutTypeForm}
                 >
                     <Select
+                        aria-label={t('analysis.canvas.layout_panel.layout_type')}
                         className={c.layoutSelect}
                         options={layoutTypeOptions}
                         onChange={handleLayoutTypeChange}

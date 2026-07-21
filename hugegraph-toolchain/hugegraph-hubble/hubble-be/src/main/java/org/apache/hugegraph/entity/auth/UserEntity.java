@@ -19,10 +19,12 @@
 package org.apache.hugegraph.entity.auth;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 import org.apache.hugegraph.common.Identifiable;
 
@@ -47,7 +49,8 @@ public class UserEntity implements Identifiable {
     @JsonProperty("user_email")
     private String email;
 
-    @JsonProperty("user_password")
+    @JsonProperty(value = "user_password", access = JsonProperty.Access.WRITE_ONLY)
+    @ToString.Exclude
     private String password;
 
     @JsonProperty("user_phone")
@@ -75,8 +78,23 @@ public class UserEntity implements Identifiable {
     @JsonProperty("spacenum")
     protected Integer spacenum;
 
-    @JsonProperty("is_superadmin")
     private boolean isSuperadmin;
+
+    @JsonIgnore
+    private boolean superadminSpecified;
+
+    @JsonProperty("is_superadmin")
+    public boolean isSuperadmin() {
+        return this.isSuperadmin;
+    }
+
+    @JsonProperty("is_superadmin")
+    public void setSuperadmin(boolean superadmin) {
+        this.isSuperadmin = superadmin;
+        this.superadminSpecified = true;
+    }
+
+    public boolean hasSuperadmin() {
+        return this.superadminSpecified;
+    }
 }
-
-

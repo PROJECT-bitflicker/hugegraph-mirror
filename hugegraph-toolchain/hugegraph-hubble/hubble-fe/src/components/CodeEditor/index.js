@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import {autocompletion} from '@codemirror/autocomplete';
+import {autocompletion, closeBrackets} from '@codemirror/autocomplete';
 import {syntaxHighlighting, HighlightStyle} from '@codemirror/language';
 import {basicSetup, EditorView} from 'codemirror';
 import React, {useRef, useEffect} from 'react';
@@ -25,10 +25,26 @@ import syntaxConfig from './syntax';
 import {tags} from '@lezer/highlight';
 import {useTranslation} from 'react-i18next';
 
-const CodeEditor = ({value, placeholder, onChange, lang = 'gremlin'}) => {
+const CodeEditor = ({
+    value,
+    placeholder,
+    onChange,
+    lang = 'gremlin',
+    readOnly = false,
+    ariaLabel,
+    minHeight,
+    metaEnterNewline = false,
+    onExecutionShortcut,
+}) => {
     const {t} = useTranslation();
     const editor = useRef();
     const cm = useRef();
+    const initialValue = useRef(value || '');
+    const onChangeRef = useRef(onChange);
+    const executionShortcutRef = useRef(onExecutionShortcut);
+    onChangeRef.current = onChange;
+    executionShortcutRef.current = onExecutionShortcut;
+    const resolvedPlaceholder = placeholder ?? t('analysis.query.placeholder');
 
     useEffect(() => {
         const syntax = syntaxConfig[lang] ?? syntaxConfig.default;
@@ -49,20 +65,65 @@ const CodeEditor = ({value, placeholder, onChange, lang = 'gremlin'}) => {
         const myHighlightStyle = HighlightStyle.define([
             {tag: tags.keyword, color: '#fc6eee'},
             {tag: tags.function, color: '#ff0'},
+            {tag: tags.string, color: '#067d17'},
+            {tag: tags.comment, color: '#6a737d', fontStyle: 'italic'},
+            {tag: tags.propertyName, color: '#005cc5'},
         ]);
 
         cm.current = new EditorView({
+            doc: initialValue.current,
             extensions: [
+                !readOnly
+                    ? EditorView.domEventHandlers({
+                        keydown: event => {
+                            if (event.key !== 'Enter'
+                                || (!event.metaKey && !event.ctrlKey)
+                                || event.altKey || event.shiftKey
+                                || event.isComposing
+                                || !executionShortcutRef.current) {
+                                return false;
+                            }
+                            event.preventDefault();
+                            executionShortcutRef.current();
+                            return true;
+                        },
+                    })
+                    : [],
                 basicSetup,
-                autocompletion({override: [myCompletions]}),
+                readOnly ? [] : closeBrackets(),
+                readOnly ? [] : autocompletion({override: [myCompletions]}),
+                syntax.language ?? [],
                 syntaxHighlighting(myHighlightStyle),
+                EditorView.editable.of(!readOnly),
+                metaEnterNewline && !readOnly
+                    ? EditorView.domEventHandlers({
+                        keydown: (event, view) => {
+                            if (event.key !== 'Enter' || !event.metaKey
+                                || event.ctrlKey || event.altKey || event.shiftKey
+                                || event.isComposing) {
+                                return false;
+                            }
+                            view.dispatch(view.state.replaceSelection('\n'));
+                            return true;
+                        },
+                    })
+                    : [],
+                ariaLabel ? EditorView.contentAttributes.of({
+                    'aria-label': ariaLabel,
+                }) : [],
                 EditorView.updateListener.of(e => {
-                    onChange && onChange(e.state.doc.toString());
+                    if (onChangeRef.current) {
+                        onChangeRef.current(e.state.doc.toString());
+                    }
                 }),
                 EditorView.theme(
                     {
                         '&': {
                             color: '#000',
+                            'min-height': minHeight ? `${minHeight}px` : undefined,
+                        },
+                        '.cm-scroller': {
+                            'min-height': minHeight ? `${minHeight}px` : undefined,
                         },
                         '&.cm-focused': {
                             outline: '0',
@@ -72,7 +133,7 @@ const CodeEditor = ({value, placeholder, onChange, lang = 'gremlin'}) => {
                         },
                     }
                 ),
-                cmplaceholder(placeholder ?? t('analysis.query.placeholder')),
+                cmplaceholder(resolvedPlaceholder),
             ],
             parent: editor.current,
         });
@@ -82,7 +143,8 @@ const CodeEditor = ({value, placeholder, onChange, lang = 'gremlin'}) => {
         return () => {
             cm.current.destroy();
         };
-    }, [t, lang, onChange, placeholder]);
+    }, [ariaLabel, lang, metaEnterNewline, minHeight, readOnly,
+        resolvedPlaceholder]);
 
     useEffect(() => {
         if (value !== null && cm.current.state.doc && value !== cm.current.state.doc.toString()) {

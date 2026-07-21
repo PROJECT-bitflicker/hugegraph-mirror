@@ -24,88 +24,121 @@ import {useCallback, useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 
 import * as api from '../../../api';
+import {useOperationsCapabilities} from '../../../pages/Operations/capabilities';
 import Item from '../Item';
-import {normalizeDashboardUrl, probeDashboard} from './dashboard';
+import {normalizeDashboardUrl} from './dashboard';
 
-const ConsoleItem = () => {
+const ConsoleItem = ({embedded = false}) => {
 
     const {t} = useTranslation();
+    const {
+        loading: capabilitiesLoading,
+        capabilities,
+        error: capabilitiesError,
+    } = useOperationsCapabilities();
     const [dashboard, setDashboard] = useState({status: 'loading', url: ''});
 
     useEffect(() => {
         let cancelled = false;
-        const loadDashboard = async () => {
-            try {
-                const res = await api.auth.getDashboard();
-                if (res?.status !== 200) {
-                    if (!cancelled) {
-                        setDashboard({status: 'unavailable', url: ''});
-                    }
-                    return;
-                }
+        api.auth.getDashboard().then(res => {
+            if (cancelled) {
+                return;
+            }
+            if (res?.status !== 200) {
+                setDashboard({status: 'unavailable', url: ''});
+            }
+            else if (!res.data?.configured) {
+                setDashboard({status: 'unconfigured', url: ''});
+            }
+            else {
                 const url = normalizeDashboardUrl(
-                    res.data?.address, res.data?.protocol
+                    res.data.address, res.data.protocol
                 );
-                if (!cancelled) {
-                    setDashboard({status: 'configured', url});
-                }
+                setDashboard({
+                    status: res.data.available ? 'configured' : 'unavailable',
+                    url,
+                });
             }
-            catch {
-                if (!cancelled) {
-                    setDashboard({status: 'unavailable', url: ''});
-                }
+        }).catch(() => {
+            if (!cancelled) {
+                setDashboard({status: 'unavailable', url: ''});
             }
-        };
-        loadDashboard();
+        });
         return () => {
             cancelled = true;
         };
     }, []);
 
-    const openDashboard = useCallback(async url => {
-        const popup = window.open('about:blank', '_blank');
+    const openDashboard = useCallback(url => {
+        const popup = window.open(url, '_blank', 'noopener,noreferrer');
         if (!popup) {
             message.error(t('navigation_page.dashboard_popup_blocked'));
-            return;
         }
-        popup.opener = null;
-        setDashboard(current => ({...current, status: 'checking'}));
-        const reachable = await probeDashboard(url);
-        if (!reachable) {
-            popup.close();
-            setDashboard(current => ({...current, status: 'unavailable'}));
-            message.error(t('navigation_page.dashboard_unavailable'));
-            return;
-        }
-        setDashboard(current => ({...current, status: 'configured'}));
-        popup.location.replace(url);
     }, [t]);
 
     const configured = Boolean(dashboard.url);
-    const reason = dashboard.status === 'loading'
+    const statusReason = dashboard.status === 'loading'
         ? t('navigation_page.dashboard_checking')
-        : dashboard.status === 'unavailable'
-            ? t('navigation_page.dashboard_unavailable')
-            : '';
-    const item = (titleKey, path = '') => ({
+        : dashboard.status === 'unconfigured'
+            ? t('navigation_page.dashboard_unconfigured')
+            : dashboard.status === 'unavailable'
+                ? t('navigation_page.dashboard_unavailable')
+                : '';
+    const reason = dashboard.status === 'loading'
+        ? statusReason
+        : [
+            t('navigation_page.dashboard_external_context'),
+            statusReason,
+        ].filter(Boolean).join(' ');
+    const dashboardItem = (titleKey, path = '') => ({
         title: t(titleKey),
         url: configured ? dashboard.url + path : '',
-        disabled: !configured || dashboard.status === 'checking',
+        disabled: !configured || dashboard.status !== 'configured',
         reason,
-        onClick: configured
+        badge: dashboard.status === 'unconfigured'
+            ? t('navigation_page.not_configured')
+            : dashboard.status === 'unavailable'
+                ? t('navigation_page.unavailable') : '',
+        onClick: configured && dashboard.status === 'configured'
             ? () => openDashboard(dashboard.url + path)
             : undefined,
+    });
+    const nativeItem = (titleKey, path, required) => {
+        const available = capabilities.includes(required);
+        const disabled = capabilitiesLoading || Boolean(capabilitiesError) || !available;
+        return {
+            title: t(titleKey),
+            url: available ? path : '',
+            disabled,
+            reason: disabled ? t('navigation_page.operations_unavailable') : '',
+            badge: disabled ? t('navigation_page.unavailable') : '',
+        };
+    };
+    const comingSoonItem = titleKey => ({
+        title: t(titleKey),
+        url: '',
+        disabled: true,
+        badge: t('navigation_page.coming_soon'),
     });
 
     return (
         <Item
             btnIndex={4}
             btnTitle={t('navigation_page.operation_manage')}
+            embedded={embedded}
             listData={[
-                item('navigation_page.cluster_manage'),
-                item('navigation_page.monitor_manage', '/monitor/machine'),
-                item('navigation_page.node_manage', '/operate/node'),
-                item('navigation_page.alert_manage', '/alert/rule'),
+                nativeItem(
+                    'navigation_page.cluster_overview',
+                    '/operations/overview',
+                    'operations_health_read'
+                ),
+                nativeItem(
+                    'navigation_page.nodes',
+                    '/operations/nodes',
+                    'operations_topology_read'
+                ),
+                dashboardItem('navigation_page.advanced_monitoring', '/monitor/machine'),
+                comingSoonItem('navigation_page.alert_manage'),
             ]}
         />
     );

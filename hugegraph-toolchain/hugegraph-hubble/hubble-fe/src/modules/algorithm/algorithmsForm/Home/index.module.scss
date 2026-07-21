@@ -18,7 +18,8 @@
 
 .algorithmSidebar {
     position: relative;
-    width: 250px;
+    flex: 0 0 340px;
+    width: 340px;
     background-color: #fff;
     border: 1px solid #E7E8E9;
     border-top: none;
@@ -40,7 +41,12 @@
     }
 
     .sideBarCollapse {
-        margin-left: -8px;
+        margin-left: 0;
+    }
+
+    .docs {
+        margin: 0 12px 8px;
+        font-size: 12px;
     }
 
     .listEmpty {
@@ -53,6 +59,9 @@
     :global {
         .ant-collapse >.ant-collapse-item >.ant-collapse-header{
             padding: 12px 10px;
+            align-items: flex-start;
+            white-space: normal;
+            line-height: 1.4;
         }
     }    
 
@@ -70,5 +79,12 @@
         .ant-form-item {
             margin-bottom: 12px;
         }
+    }
+}
+
+@media (max-width: 900px) {
+    .algorithmSidebar {
+        flex: 0 0 280px;
+        width: 280px;
     }
 }

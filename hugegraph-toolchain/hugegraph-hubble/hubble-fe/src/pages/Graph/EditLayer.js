@@ -17,12 +17,34 @@
  */
 
 import {Alert, Button, Modal, Form, Input, Select, Spin, message} from 'antd';
-import {useState, useEffect, useCallback, useRef} from 'react';
+import {useState, useEffect, useCallback, useMemo, useRef} from 'react';
 import {useTranslation} from 'react-i18next';
 import * as api from '../../api/index';
 import * as rules from '../../utils/rules';
 import {byteConvert, timeConvert} from '../../utils/format';
 import style from './index.module.scss';
+import {BUILTIN_SCHEMA_TEMPLATES} from '../Schema/builtinSchemaTemplates';
+import {toGraphSchemaGroovy} from '../Schema/schemaGroovy';
+import {getResourceAlias, getResourceDisplayName} from '../../utils/displayName';
+import {isPdEnabled} from '../../utils/config';
+
+const PAGE_ERROR_CONFIG = {suppressBusinessErrorToast: true};
+const DUPLICATE_SCHEMA_TEMPLATE
+    = 'Cannot create schema template since it has been created';
+
+const normalizeSchema = schema => String(schema ?? '').replace(/\s+/g, ' ').trim();
+
+const isEquivalentBuiltinSchema = (actual, expected) => (
+    normalizeSchema(actual) === normalizeSchema(expected)
+);
+
+const errorMessage = error => (
+    error?.response?.data?.message || error?.data?.message || error?.message
+);
+
+const isDuplicateSchemaError = error => (
+    (error?.message || error?.response?.data?.message) === DUPLICATE_SCHEMA_TEMPLATE
+);
 
 const EditLayer = ({visible, onCancel, refresh, graphspace, graph}) => {
     const [schemaList, setSchemaList] = useState([]);
@@ -31,12 +53,79 @@ const EditLayer = ({visible, onCancel, refresh, graphspace, graph}) => {
     const [loading, setLoading] = useState(false);
     const [form] = Form.useForm();
     const {t} = useTranslation();
+    const pdMode = isPdEnabled();
+    const schemaOptions = useMemo(() => {
+        const builtinNames = new Set(Object.keys(BUILTIN_SCHEMA_TEMPLATES));
+        const builtins = [...builtinNames].map(name => ({
+            label: t(`schema_template.builtin.${name}`),
+            value: name,
+        }));
+        const saved = pdMode
+            ? schemaList
+                .filter(item => !builtinNames.has(item.name))
+                .map(item => ({label: item.name, value: item.name}))
+            : [];
+
+        return [...builtins, ...saved];
+    }, [pdMode, schemaList, t]);
+
+    const confirmBuiltinTemplate = useCallback(async (name, expectedSchema) => {
+        const res = await api.manage.getSchema(graphspace, name, PAGE_ERROR_CONFIG);
+        if (res.status !== 200) {
+            throw new Error(res.message || t('graph.form.schema_verify_failed'));
+        }
+        if (!isEquivalentBuiltinSchema(res.data?.schema, expectedSchema)) {
+            throw new Error(t('graph.form.schema_conflict', {name}));
+        }
+    }, [graphspace, t]);
+
+    const ensureBuiltinTemplate = useCallback(async (name, expectedSchema) => {
+        const listedTemplate = schemaList.find(item => item.name === name);
+        if (listedTemplate) {
+            if (listedTemplate.schema !== undefined) {
+                if (!isEquivalentBuiltinSchema(listedTemplate.schema, expectedSchema)) {
+                    throw new Error(t('graph.form.schema_conflict', {name}));
+                }
+                return;
+            }
+            await confirmBuiltinTemplate(name, expectedSchema);
+            return;
+        }
+
+        let result;
+        try {
+            result = await api.manage.addSchema(graphspace, {
+                name,
+                schema: expectedSchema,
+            }, PAGE_ERROR_CONFIG);
+        }
+        catch (error) {
+            if (isDuplicateSchemaError(error)) {
+                await confirmBuiltinTemplate(name, expectedSchema);
+                return;
+            }
+            throw new Error(errorMessage(error) || t('graph.form.schema_create_failed'));
+        }
+
+        if (result.status === 200) {
+            return;
+        }
+        if (isDuplicateSchemaError(result)) {
+            await confirmBuiltinTemplate(name, expectedSchema);
+            return;
+        }
+        throw new Error(result.message || t('graph.form.schema_create_failed'));
+    }, [confirmBuiltinTemplate, graphspace, schemaList, t]);
 
     const loadSchemaTemplates = useCallback(() => {
         setSchemaList([]);
         setSchemaError(false);
+        if (!pdMode) {
+            setSchemaLoading(false);
+            return;
+        }
         setSchemaLoading(true);
-        api.manage.getSchemaList(graphspace).then(res => {
+        api.manage.getSchemaList(graphspace, {page_size: -1}).then(res => {
             if (res.status === 200) {
                 setSchemaList(res.data.records);
                 return;
@@ -44,7 +133,7 @@ const EditLayer = ({visible, onCancel, refresh, graphspace, graph}) => {
             setSchemaError(true);
         }).catch(() => setSchemaError(true))
             .finally(() => setSchemaLoading(false));
-    }, [graphspace]);
+    }, [graphspace, pdMode]);
 
     const onFinish = useCallback(() => {
         form.validateFields().then(values => {
@@ -64,7 +153,46 @@ const EditLayer = ({visible, onCancel, refresh, graphspace, graph}) => {
                 return;
             }
 
-            api.manage.addGraph(graphspace, {...values, auth: false, graphspace}).then(res => {
+            const builtinSchema = BUILTIN_SCHEMA_TEMPLATES[values.schema];
+            const ensureTemplate = pdMode && builtinSchema
+                ? ensureBuiltinTemplate(values.schema, builtinSchema)
+                : Promise.resolve();
+
+            ensureTemplate.then(async () => {
+                const graphRequest = {...values, auth: false, graphspace};
+                if (!pdMode) {
+                    delete graphRequest.schema;
+                }
+                const result = await api.manage.addGraph(graphspace, graphRequest);
+                if (result.status !== 200 || pdMode || !builtinSchema) {
+                    return result;
+                }
+                try {
+                    const schemaResult = await api.manage.addGraphSchema(
+                        graphspace,
+                        values.graph,
+                        {'schema-groovy': toGraphSchemaGroovy(builtinSchema)},
+                        PAGE_ERROR_CONFIG
+                    );
+                    if (schemaResult.status !== 200) {
+                        throw new Error(schemaResult.message
+                                        || t('graph.form.schema_apply_failed'));
+                    }
+                }
+                catch (error) {
+                    const messageText = errorMessage(error)
+                        || t('graph.form.schema_apply_failed');
+                    const partialError = error instanceof Error
+                        ? error
+                        : new Error(messageText);
+                    if (!partialError.message) {
+                        partialError.message = messageText;
+                    }
+                    partialError.graphCreated = true;
+                    throw partialError;
+                }
+                return result;
+            }).then(res => {
                 setLoading(false);
                 if (res.status === 200) {
                     message.success(t('graph.form.create_success'));
@@ -73,9 +201,16 @@ const EditLayer = ({visible, onCancel, refresh, graphspace, graph}) => {
                     return;
                 }
                 message.error(res.message);
+            }).catch(error => {
+                setLoading(false);
+                if (error.graphCreated) {
+                    onCancel();
+                    refresh();
+                }
+                message.error(error.message || t('common.msg.operation_failed'));
             });
         });
-    }, [form, graphspace, graph, refresh, onCancel, t]);
+    }, [form, graphspace, graph, refresh, onCancel, ensureBuiltinTemplate, pdMode, t]);
 
     useEffect(() => {
         if (!visible) {
@@ -89,7 +224,11 @@ const EditLayer = ({visible, onCancel, refresh, graphspace, graph}) => {
         if (graph) {
             api.manage.getGraph(graphspace, graph).then(res => {
                 if (res.status === 200) {
-                    form.setFieldsValue({...res.data, graph: res.data.name});
+                    form.setFieldsValue({
+                        ...res.data,
+                        graph: res.data.name,
+                        nickname: getResourceAlias(res.data.name, res.data.nickname),
+                    });
                 }
             });
         }
@@ -113,6 +252,7 @@ const EditLayer = ({visible, onCancel, refresh, graphspace, graph}) => {
             >
                 <Form.Item
                     label={t('graph.form.name')}
+                    extra={t('graph.form.name_help')}
                     rules={[rules.required(), rules.isName, {type: 'string', max: 48}]}
                     name='graph'
                 >
@@ -120,7 +260,9 @@ const EditLayer = ({visible, onCancel, refresh, graphspace, graph}) => {
                 </Form.Item>
                 <Form.Item
                     label={t('graph.form.nickname')}
-                    rules={[rules.required(), rules.isPropertyName, {type: 'string', max: 48}]}
+                    extra={t('graph.form.nickname_help')}
+                    // Keep this validation aligned with Server GraphManager.checkNickname().
+                    rules={[rules.isPropertyName(), {type: 'string', max: 48}]}
                     name='nickname'
                 >
                     <Input placeholder={t('graph.form.nickname_placeholder')} />
@@ -141,18 +283,22 @@ const EditLayer = ({visible, onCancel, refresh, graphspace, graph}) => {
                             />
                         )}
                         <Form.Item
-                            label='schema'
+                            label={t('graph.form.schema')}
                             name='schema'
-                            extra={t('graph.form.schema_optional_hint')}
+                            extra={(
+                                <span>
+                                    {t('graph.form.schema_optional_hint')}{' '}
+                                    <a href={`/graphspace/${graphspace}/schema?create=true`}>
+                                        {t('graph.form.schema_create')}
+                                    </a>
+                                </span>
+                            )}
                         >
                             <Select
                                 loading={schemaLoading}
                                 disabled={schemaLoading || schemaError}
                                 placeholder={t('graph.form.schema_placeholder')}
-                                options={schemaList.map(item => ({
-                                    label: item.name,
-                                    value: item.name,
-                                }))}
+                                options={schemaOptions}
                             />
                         </Form.Item>
                     </>
@@ -394,7 +540,12 @@ const CloneLayer = ({open, onCancel, refresh, graphspace, graph}) => {
                     rules={[rules.required()]}
                     name='graphspace'
                 >
-                    <Select options={graphspaceList.map(item => ({label: item.nickname, value: item.name}))} />
+                    <Select
+                        options={graphspaceList.map(item => ({
+                            label: getResourceDisplayName(item.name, item.nickname),
+                            value: item.name,
+                        }))}
+                    />
                 </Form.Item>
                 <Form.Item
                     label={t('graph.clone.content')}

@@ -34,7 +34,9 @@ import * as api from '../../../api';
 import * as rules from '../../../utils/rules';
 import style from '../index.module.scss';
 
-const FieldTitle = ({fieldKey, onDelete, confirmTitle, okText, cancelText}) => {
+const HiddenFormValue = () => null;
+
+const FieldTitle = ({fieldKey, onDelete, confirmTitle, deleteLabel, okText, cancelText}) => {
     const handleConfirm = useCallback(() => onDelete(fieldKey), [fieldKey, onDelete]);
     return (
         <Space>
@@ -45,7 +47,13 @@ const FieldTitle = ({fieldKey, onDelete, confirmTitle, okText, cancelText}) => {
                 okText={okText}
                 cancelText={cancelText}
             >
-                <MinusSquareOutlined />
+                <Button
+                    type='text'
+                    size='small'
+                    aria-label={deleteLabel}
+                    title={deleteLabel}
+                    icon={<MinusSquareOutlined />}
+                />
             </Popconfirm>
         </Space>
     );
@@ -97,10 +105,11 @@ const FieldForm = ({visible, prev, datasourceID}) => {
 
     const setKey = useCallback(val => {
         setTargetKeys(val);
+        fieldForm.setFieldValue('target_keys', val);
         if (val.length > 0) {
             setTransferStatus('');
         }
-    }, []);
+    }, [fieldForm]);
 
     const addField = useCallback(() => {
         if (inputData && status !== 'error') {
@@ -136,6 +145,7 @@ const FieldForm = ({visible, prev, datasourceID}) => {
                 fieldKey={props.key}
                 onDelete={handleDelete}
                 confirmTitle={t('task.edit.delete_field_confirm')}
+                deleteLabel={t('task.edit.delete_field', {field: props.key})}
                 okText={t('common.action.confirm')}
                 cancelText={t('common.action.cancel')}
             />,
@@ -149,7 +159,17 @@ const FieldForm = ({visible, prev, datasourceID}) => {
                 <div style={{margin: 5}}>
                     <Input
                         value={inputData}
-                        addonAfter={<PlusOutlined onClick={addField} />}
+                        addonAfter={(
+                            <Button
+                                type='text'
+                                size='small'
+                                aria-label={t('task.edit.add_field')}
+                                title={t('task.edit.add_field')}
+                                icon={<PlusOutlined />}
+                                disabled={!inputData || status === 'error'}
+                                onClick={addField}
+                            />
+                        )}
                         placeholder={t('task.edit.add_field_placeholder')}
                         onChange={handleInputData}
                         status={status}
@@ -193,6 +213,12 @@ const FieldForm = ({visible, prev, datasourceID}) => {
         <div style={{display: visible ? '' : 'none'}} className={style.transfer}>
             <Form form={fieldForm} name='field_form'>
                 <Typography.Title level={5}>{t('task.edit.step_source_fields')}</Typography.Title>
+                <Alert
+                    showIcon
+                    type='info'
+                    message={t('task.edit.fields_help_title')}
+                    description={t('task.edit.fields_help')}
+                />
                 {loadError && (
                     <Alert
                         showIcon
@@ -205,10 +231,7 @@ const FieldForm = ({visible, prev, datasourceID}) => {
                         )}
                     />
                 )}
-                <Form.Item
-                    name='target_keys'
-                    rules={[rules.required(t('task.edit.select_source_fields'))]}
-                >
+                <Form.Item>
                     <Transfer
                         dataSource={data}
                         titles={[
@@ -237,7 +260,16 @@ const FieldForm = ({visible, prev, datasourceID}) => {
                         }}
                     </Transfer>
                 </Form.Item>
-                <Form.Item name='source_keys' hidden />
+                <Form.Item
+                    name='target_keys'
+                    rules={[rules.required(t('task.edit.select_source_fields'))]}
+                    hidden
+                >
+                    <HiddenFormValue />
+                </Form.Item>
+                <Form.Item name='source_keys' hidden>
+                    <HiddenFormValue />
+                </Form.Item>
                 <Form.Item>
                     <Space>
                         <Button onClick={prev}>{t('common.action.back')}</Button>

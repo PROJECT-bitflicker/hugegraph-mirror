@@ -29,10 +29,12 @@ import org.apache.hugegraph.common.Constant;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.driver.HugeClient;
 import org.apache.hugegraph.entity.GraphConnection;
+import org.apache.hugegraph.entity.enums.JobStatus;
 import org.apache.hugegraph.entity.enums.LoadStatus;
 import org.apache.hugegraph.entity.load.EdgeMapping;
 import org.apache.hugegraph.entity.load.FileMapping;
 import org.apache.hugegraph.entity.load.FileSetting;
+import org.apache.hugegraph.entity.load.JobManager;
 import org.apache.hugegraph.entity.load.ListFormat;
 import org.apache.hugegraph.entity.load.LoadParameter;
 import org.apache.hugegraph.entity.load.LoadTask;
@@ -51,16 +53,23 @@ import org.apache.hugegraph.loader.source.file.FileFormat;
 import org.apache.hugegraph.loader.source.file.FileSource;
 import org.apache.hugegraph.loader.util.MappingUtil;
 import org.apache.hugegraph.loader.util.Printer;
+import org.apache.hugegraph.mapper.load.JobManagerMapper;
 import org.apache.hugegraph.mapper.load.LoadTaskMapper;
 import org.apache.hugegraph.service.schema.EdgeLabelService;
 import org.apache.hugegraph.service.schema.VertexLabelService;
 import org.apache.hugegraph.util.Ex;
+import org.apache.hugegraph.util.HubbleUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.File;
 import java.io.IOException;
@@ -82,6 +91,8 @@ public class LoadTaskService {
     @Autowired
     private LoadTaskMapper mapper;
     @Autowired
+    private JobManagerMapper jobManagerMapper;
+    @Autowired
     private VertexLabelService vlService;
     @Autowired
     private EdgeLabelService elService;
@@ -89,6 +100,8 @@ public class LoadTaskService {
     private LoadTaskExecutor taskExecutor;
     @Autowired
     private HugeConfig config;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
 
     private Map<Integer, LoadTask> runningTaskContainer;
@@ -153,15 +166,44 @@ public class LoadTaskService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void save(LoadTask entity) {
-        if (this.mapper.insert(entity) != 1) {
-            throw new InternalException("entity.insert.failed", entity);
+        LoadOptions runtimeOptions = entity.getOptions();
+        entity.setOptions(withoutCredentials(runtimeOptions));
+        try {
+            if (this.mapper.insert(entity) != 1) {
+                throw new InternalException("entity.insert.failed");
+            }
+        } finally {
+            entity.setOptions(runtimeOptions);
         }
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void update(LoadTask entity) {
-        if (this.mapper.updateById(entity) != 1) {
-            throw new InternalException("entity.update.failed", entity);
+        LoadOptions runtimeOptions = entity.getOptions();
+        entity.setOptions(withoutCredentials(runtimeOptions));
+        try {
+            if (this.mapper.updateById(entity) != 1) {
+                throw new InternalException("entity.update.failed");
+            }
+        } finally {
+            entity.setOptions(runtimeOptions);
+        }
+    }
+
+    private static LoadOptions withoutCredentials(LoadOptions options) {
+        if (options == null) {
+            return null;
+        }
+        try {
+            LoadOptions persisted = (LoadOptions) options.clone();
+            persisted.password = null;
+            persisted.token = null;
+            persisted.pdToken = null;
+            persisted.trustStoreToken = null;
+            return persisted;
+        } catch (CloneNotSupportedException e) {
+            throw new InternalException("Failed to prepare load task options",
+                                        e);
         }
     }
 
@@ -183,11 +225,80 @@ public class LoadTaskService {
                           HugeClient client) {
         LoadTask task = this.buildLoadTask(connection, fileMapping, client);
         this.save(task);
+        this.executeAfterCommit(task);
+        return task;
+    }
+
+    protected void executeAfterCommit(LoadTask task) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            this.executeSafely(task);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        executeSafely(task);
+                    }
+                });
+    }
+
+    private void executeSafely(LoadTask task) {
+        try {
+            this.execute(task);
+        } catch (RuntimeException e) {
+            this.markDispatchFailed(task, e);
+        }
+    }
+
+    private void markDispatchFailed(LoadTask task, RuntimeException cause) {
+        log.error("Failed to dispatch load task {}, marking task and job " +
+                  "as FAILED", task.getId(), cause);
+        task.setStatus(LoadStatus.FAILED);
+        this.runningTaskContainer.remove(task.getId());
+
+        try {
+            TransactionTemplate transaction =
+                    new TransactionTemplate(this.transactionManager);
+            transaction.setPropagationBehavior(
+                    TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            transaction.execute(status -> {
+                int updated = this.mapper.update(
+                        null, Wrappers.<LoadTask>update()
+                                      .eq("id", task.getId())
+                                      .set("load_status",
+                                           LoadStatus.FAILED.getValue()));
+                if (updated != 1) {
+                    throw new InternalException("entity.update.failed", task);
+                }
+                if (task.getJobId() == null) {
+                    return null;
+                }
+                JobManager job = this.jobManagerMapper.selectById(
+                        task.getJobId());
+                if (job == null) {
+                    return null;
+                }
+                job.setJobStatus(JobStatus.FAILED);
+                job.setUpdateTime(HubbleUtil.nowDate());
+                if (this.jobManagerMapper.updateById(job) != 1) {
+                    throw new InternalException("entity.update.failed", job);
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            // The ingest transaction is already committed. Never turn a
+            // dispatch failure into a retryable request failure.
+            log.error("Failed to persist dispatch failure for load task {}",
+                      task.getId(), e);
+        }
+    }
+
+    private void execute(LoadTask task) {
         // Executed in other threads
         this.taskExecutor.execute(task, () -> this.update(task));
         // Save current load task
         this.runningTaskContainer.put(task.getId(), task);
-        return task;
     }
 
     public LoadTask pause(int taskId) {
@@ -209,7 +320,7 @@ public class LoadTaskService {
         return task;
     }
 
-    public LoadTask resume(int taskId) {
+    public LoadTask resume(int taskId, String token) {
         LoadTask task = this.get(taskId);
         Ex.check(task.getStatus() == LoadStatus.PAUSED ||
                  task.getStatus() == LoadStatus.FAILED,
@@ -218,6 +329,7 @@ public class LoadTaskService {
         try {
             // Set work mode in incrental mode, load from last breakpoint
             task.getOptions().incrementalMode = true;
+            task.reconnect(token);
             task.setStatus(LoadStatus.RUNNING);
             this.update(task);
             this.taskExecutor.execute(task, () -> this.update(task));
@@ -252,7 +364,7 @@ public class LoadTaskService {
         return task;
     }
 
-    public LoadTask retry(int taskId) {
+    public LoadTask retry(int taskId, String token) {
         LoadTask task = this.get(taskId);
         Ex.check(task.getStatus() == LoadStatus.FAILED ||
                  task.getStatus() == LoadStatus.STOPPED,
@@ -261,6 +373,7 @@ public class LoadTaskService {
         try {
             // Set work mode in normal mode, load from begin
             task.getOptions().incrementalMode = false;
+            task.reconnect(token);
             task.setStatus(LoadStatus.RUNNING);
             task.setLastDuration(0L);
             task.setCurrDuration(0L);
@@ -393,11 +506,8 @@ public class LoadTaskService {
             options.port = connection.getPort();
         }
         options.username = connection.getUsername();
-        if (StringUtils.isNotEmpty(connection.getPassword())) {
-            options.password = connection.getPassword();
-        } else {
-            options.token = connection.getToken();
-        }
+        options.password = null;
+        options.token = connection.getToken();
         options.protocol = StringUtils.isNotEmpty(connection.getProtocol()) ?
                            connection.getProtocol() : "http";
         // Load parameters

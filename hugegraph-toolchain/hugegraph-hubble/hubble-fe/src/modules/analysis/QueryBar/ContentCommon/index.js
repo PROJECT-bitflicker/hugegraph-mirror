@@ -17,23 +17,21 @@
  */
 
 /**
- * @file Gremlin语法分析 Header
+ * @file Gremlin query actions
  */
 
-import React, {useCallback, useState, useContext} from 'react';
+import React, {useCallback, useContext, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Button, Tooltip, Dropdown, Popover, message, Space} from 'antd';
-import {UpOutlined, DownOutlined, QuestionCircleOutlined} from '@ant-design/icons';
+import {Button, Tooltip, Popover, message, Space} from 'antd';
+import {ClockCircleOutlined, ThunderboltOutlined} from '@ant-design/icons';
 import {GREMLIN_EXECUTES_MODE} from '../../../../utils/constants';
 import GraphAnalysisContext from '../../../Context';
-import classnames from 'classnames';
 import {isValidFavoriteName} from '../../../../utils/rules';
 import FavoriteNameInput from '../../../../components/FavoriteNameInput';
 import c from './index.module.scss';
 import * as api from '../../../../api/index';
-import KeyboardAction from '../../../../components/KeyboardAction';
 
-const FAVORITE_TYPE  = {
+const FAVORITE_TYPE = {
     Gremlin: 'GREMLIN',
     Algorithms: 'ALGORITHM',
     Cypher: 'CYPHER',
@@ -41,47 +39,22 @@ const FAVORITE_TYPE  = {
 
 const {QUERY, TASK} = GREMLIN_EXECUTES_MODE;
 
-const ContentCommon = props => {
+const SecondaryActions = props => {
     const {t} = useTranslation();
     const {
         codeEditorContent,
         setCodeEditorContent,
-        executeMode,
-        onExecuteModeChange,
         activeTab,
-        onExecute,
         onRefresh,
         isEmptyQuery,
         favoriteCardVisible,
         setFavoriteCardVisible,
+        shortcutHint,
     } = props;
-
     const context = useContext(GraphAnalysisContext);
-    const isQueryMode = executeMode === QUERY;
-
-    const [isShowMore, setShowMore] = useState(true);
     const [favoriteName, setFavoriteName] = useState();
-    const [disabledFavorite, setDisabledFavorite]  = useState(true);
-
-    const queryDesc = t('analysis.query.execute_mode_desc');
+    const [disabledFavorite, setDisabledFavorite] = useState(true);
     const emptyDesc = t('analysis.query.empty_query');
-
-    const onToggleCollapse = useCallback(
-        () => {
-            setShowMore(prev => !prev);
-        },
-        []
-    );
-
-    const renderCollapseHeader = () => {
-        const icon = isShowMore ? <UpOutlined /> : <DownOutlined />;
-        const iconName = isShowMore
-            ? <span>{t('analysis.query.collapse')}</span>
-            : <span>{t('analysis.query.expand')}</span>;
-        return (
-            <div>{icon}{iconName}</div>
-        );
-    };
 
     const onClear = useCallback(
         () => {
@@ -137,11 +110,11 @@ const ContentCommon = props => {
         [setFavoriteCardVisible]
     );
 
-    const onChangeFavoraiteName = useCallback(
-        e => {
-            const favoriteName = e.target.value;
-            setFavoriteName(favoriteName);
-            setDisabledFavorite(!isValidFavoriteName(favoriteName));
+    const onChangeFavoriteName = useCallback(
+        event => {
+            const name = event.target.value;
+            setFavoriteName(name);
+            setDisabledFavorite(!isValidFavoriteName(name));
         },
         []
     );
@@ -151,7 +124,7 @@ const ContentCommon = props => {
             <FavoriteNameInput
                 placeholder={t('analysis.query.favorite_name_placeholder')}
                 value={favoriteName}
-                onChange={onChangeFavoraiteName}
+                onChange={onChangeFavoriteName}
             />
             <Space style={{marginTop: '24px'}}>
                 <Button type='primary' onClick={onOkFavorite} disabled={disabledFavorite}>
@@ -162,89 +135,118 @@ const ContentCommon = props => {
         </>
     );
 
-    const tabClassName = classnames(
-        c.tabContent,
-        {[c.tabContentCollpased]: !isShowMore}
+    return (
+        <div className={c.secondaryActions}>
+            <Button className={c.btn} onClick={onClear} size='small'>
+                {t('common.action.clear')}
+            </Button>
+            <Popover
+                placement='bottom'
+                trigger='click'
+                overlayClassName={c.favoriteModel}
+                title={t('analysis.query.favorite_statement')}
+                content={favoriteContent}
+                open={favoriteCardVisible}
+            >
+                <Tooltip placement='bottom' title={isEmptyQuery ? emptyDesc : ''}>
+                    <Button
+                        className={c.btn}
+                        disabled={isEmptyQuery}
+                        onClick={onFavoriteCard}
+                        size='small'
+                    >
+                        {t('analysis.query.favorite')}
+                    </Button>
+                </Tooltip>
+            </Popover>
+            {shortcutHint && (
+                <span className={c.shortcutHint}>{shortcutHint}</span>
+            )}
+        </div>
     );
+};
 
-    const onSwitchExecuteMenu = useCallback(
-        e => {
-            if (e.key === QUERY) {
-                onExecuteModeChange(QUERY);
-            }
-            else {
-                onExecuteModeChange(TASK);
-            }
-        },
-        [onExecuteModeChange]
+const PrimaryActions = props => {
+    const {t} = useTranslation();
+    const {
+        executeMode,
+        onExecuteModeChange,
+        activeTab,
+        onExecute,
+        isEmptyQuery,
+        isExecuting,
+    } = props;
+    const isQueryMode = executeMode === QUERY;
+    const emptyDesc = t('analysis.query.empty_query');
+
+    const onSwitchExecuteMode = useCallback(
+        () => onExecuteModeChange(isQueryMode ? TASK : QUERY),
+        [isQueryMode, onExecuteModeChange]
     );
 
     const onExecution = useCallback(
         () => {
-            onExecute(activeTab);
+            if (!isEmptyQuery && !isExecuting) {
+                onExecute(activeTab);
+            }
         },
-        [activeTab, onExecute]
+        [activeTab, isEmptyQuery, isExecuting, onExecute]
     );
 
-    const executeMenu = {
-        onClick: onSwitchExecuteMenu,
-        items: [
-            {label: t('analysis.query.execute_query'), key: QUERY},
-            {label: t('analysis.query.execute_task'), key: TASK},
-        ],
-    };
-
     return (
-        <div className={tabClassName}>
-            <div className={c.leftHeader}>
-                {props.children}
-                <div className={c.btnGroup}>
-                    <Tooltip placement="bottom" title={isEmptyQuery ? emptyDesc : ''}>
-                        <Dropdown.Button
-                            menu={executeMenu}
-                            disabled={isEmptyQuery}
-                            onClick={onExecution}
-                            size='small'
-                        >
-                            {isQueryMode ? t('analysis.query.execute_query') : t('analysis.query.execute_task')}
-                        </Dropdown.Button>
-                    </Tooltip>
-                    <Tooltip placement="bottom" title={queryDesc} className={c.questionCircleIcon}>
-                        <QuestionCircleOutlined />
-                    </Tooltip>
-                    <Popover
-                        placement="bottom"
-                        trigger='click'
-                        overlayClassName={c.favoriteModel}
-                        title={t('analysis.query.favorite_statement')}
-                        content={favoriteContent}
-                        open={favoriteCardVisible}
+        <div className={c.primaryActions}>
+            <div className={c.executionControl}>
+                <Tooltip
+                    placement='top'
+                    title={t(isQueryMode
+                        ? 'analysis.query.switch_async_task'
+                        : 'analysis.query.switch_immediate_query')}
+                >
+                    <Button
+                        className={c.modeButton}
+                        icon={isQueryMode
+                            ? <ThunderboltOutlined />
+                            : <ClockCircleOutlined />}
+                        onClick={onSwitchExecuteMode}
+                        aria-label={t(isQueryMode
+                            ? 'analysis.query.switch_async_task'
+                            : 'analysis.query.switch_immediate_query')}
                     >
-                        <Tooltip placement="bottom" title={isEmptyQuery ? emptyDesc : ''}>
-                            <Button
-                                className={c.btn}
-                                disabled={isEmptyQuery}
-                                onClick={onFavoriteCard}
-                                size='small'
-                            >
-                                {t('analysis.query.favorite')}
-                            </Button>
-                        </Tooltip>
-                    </Popover>
-                    <Button className={c.btn} onClick={onClear} size='small'>
-                        {t('common.action.clear')}
+                        {t(isQueryMode
+                            ? 'analysis.query.execute_mode_immediate'
+                            : 'analysis.query.execute_mode_async')}
                     </Button>
-                </div>
+                </Tooltip>
+                <Tooltip
+                    placement='top'
+                    title={isEmptyQuery
+                        ? emptyDesc
+                        : t('analysis.query.execute_shortcut')}
+                >
+                    <Button
+                        className={c.executeButton}
+                        type='primary'
+                        disabled={isEmptyQuery || isExecuting}
+                        onClick={onExecution}
+                        title={t('analysis.query.execute_shortcut')}
+                    >
+                        {isQueryMode
+                            ? t('analysis.query.execute_query')
+                            : t('analysis.query.execute_task')}
+                    </Button>
+                </Tooltip>
             </div>
-            <KeyboardAction
-                className={c.showMoreButton}
-                onAction={onToggleCollapse}
-                aria-expanded={isShowMore}
-            >
-                {renderCollapseHeader()}
-            </KeyboardAction>
         </div>
     );
 };
+
+export {PrimaryActions, SecondaryActions};
+
+const ContentCommon = props => (
+    <div className={c.actionBar}>
+        <SecondaryActions {...props} />
+        <PrimaryActions {...props} />
+    </div>
+);
 
 export default ContentCommon;

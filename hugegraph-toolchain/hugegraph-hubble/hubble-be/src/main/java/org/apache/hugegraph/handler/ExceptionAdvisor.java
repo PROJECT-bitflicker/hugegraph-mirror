@@ -18,15 +18,23 @@
 
 package org.apache.hugegraph.handler;
 
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
+
+import javax.servlet.http.HttpServletRequest;
+
 import org.apache.hugegraph.driver.HugeClient;
 import org.apache.hugegraph.exception.ServerException;
 import org.apache.hugegraph.exception.ExternalException;
+import org.apache.hugegraph.exception.ForbiddenException;
 import org.apache.hugegraph.exception.IllegalGremlinException;
 import org.apache.hugegraph.exception.InternalException;
 import org.apache.hugegraph.exception.LoginThrottledException;
 import org.apache.hugegraph.exception.ParameterizedException;
 import org.apache.hugegraph.exception.ServerCapabilityUnavailableException;
 import org.apache.hugegraph.exception.UnauthorizedException;
+import org.apache.hugegraph.service.op.OperationsNodeNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -43,11 +51,6 @@ import org.apache.hugegraph.util.JsonUtil;
 import org.apache.hugegraph.util.HubbleUtil;
 
 import lombok.extern.log4j.Log4j2;
-
-import java.util.List;
-import java.util.Map;
-
-import javax.servlet.http.HttpServletRequest;
 
 @Log4j2
 @RestControllerAdvice
@@ -77,7 +80,7 @@ public class ExceptionAdvisor {
     @ExceptionHandler(InternalException.class)
     @ResponseStatus(HttpStatus.OK)
     public Response exceptionHandler(InternalException e) {
-        log.warn("Internal request failure");
+        log.warn("hubble.internal_request_failed");
         String message = this.handleMessage(e.getMessage(), e.args());
         closeRequestClient();
         return Response.builder()
@@ -90,12 +93,44 @@ public class ExceptionAdvisor {
     @ExceptionHandler(ExternalException.class)
     @ResponseStatus(HttpStatus.OK)
     public Response exceptionHandler(ExternalException e) {
-        log.debug("External request failure: {}", e.getMessage());
+        log.debug("hubble.external_request_failed");
         String message = this.handleMessage(e.getMessage(), e.args());
         closeRequestClient();
         return Response.builder()
-                       .status(e.status())
+                       .status(errorStatus(e.status()))
                        .message(message)
+                       .cause(null)
+                       .build();
+    }
+
+    static int errorStatus(int status) {
+        if (status >= HttpStatus.BAD_REQUEST.value() &&
+            status <= HttpStatus.NETWORK_AUTHENTICATION_REQUIRED.value()) {
+            return status;
+        }
+        return Constant.STATUS_BAD_REQUEST;
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public Response exceptionHandler(ForbiddenException e) {
+        log.debug("hubble.forbidden_request");
+        closeRequestClient();
+        return Response.builder()
+                       .status(HttpStatus.FORBIDDEN.value())
+                       .message(sanitize(e.getMessage()))
+                       .cause(null)
+                       .build();
+    }
+
+    @ExceptionHandler(OperationsNodeNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Response exceptionHandler(OperationsNodeNotFoundException e) {
+        log.debug("Operations node was not found");
+        closeRequestClient();
+        return Response.builder()
+                       .status(HttpStatus.NOT_FOUND.value())
+                       .message(e.getMessage())
                        .cause(null)
                        .build();
     }
@@ -115,22 +150,56 @@ public class ExceptionAdvisor {
     @ExceptionHandler(ServerException.class)
     @ResponseStatus(HttpStatus.OK)
     public Response exceptionHandler(ServerException e) {
-        log.warn("HugeGraph Server request failed");
+        boolean operations = this.isOperationsRequest();
+        log.error("hubble.server_request_failed");
 
-        String message = this.handleMessage(e.getMessage(), null);
+        String message = operations ? safeServerMessage(e) :
+                         this.handleMessage(sanitize(e.getMessage()), null);
         closeRequestClient();
         return Response.builder()
-                       .status(Constant.STATUS_BAD_REQUEST)
+                       .status(serverStatus(e.status()))
                        .message(message)
                        .cause(null)
                        .build();
     }
 
+    static int serverStatus(int status) {
+        if (status == HttpStatus.UNAUTHORIZED.value() ||
+            status == HttpStatus.FORBIDDEN.value()) {
+            return status;
+        }
+        return Constant.STATUS_BAD_REQUEST;
+    }
+
+    private static boolean transportFailure(ServerException exception) {
+        if (serverStatus(exception.status()) != Constant.STATUS_BAD_REQUEST) {
+            return false;
+        }
+        String message = exception.getMessage();
+        return message != null &&
+               (message.startsWith("Failed to connect to ") ||
+                message.contains("Connection refused"));
+    }
+
+    private static String safeServerMessage(ServerException exception) {
+        if (exception.status() == HttpStatus.UNAUTHORIZED.value()) {
+            return "upstream_unauthorized";
+        }
+        if (exception.status() == HttpStatus.FORBIDDEN.value()) {
+            return "upstream_forbidden";
+        }
+        return transportFailure(exception) ? "upstream_unavailable" :
+               "upstream_request_failed";
+    }
+
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.OK)
     public Response exceptionHandler(Exception e) {
-        log.error("Unexpected request failure", e);
-        String message = this.handleMessage(e.getMessage(), null);
+        boolean operations = this.isOperationsRequest();
+        log.error("hubble.unexpected_request_failed");
+        String message = operations ?
+                         "unexpected_request_failure" :
+                         this.handleMessage(sanitize(e.getMessage()), null);
         closeRequestClient();
         return Response.builder()
                        .status(Constant.STATUS_BAD_REQUEST)
@@ -157,7 +226,7 @@ public class ExceptionAdvisor {
     @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
     public Response exceptionHandler(
             ServerCapabilityUnavailableException e) {
-        log.warn("Required HugeGraph Server capability is unavailable", e);
+        log.warn("hubble.server_capability_unavailable");
         String message = this.handleMessage(e.getMessage(), e.args());
         closeRequestClient();
         return Response.builder()
@@ -170,7 +239,7 @@ public class ExceptionAdvisor {
     @ExceptionHandler(IllegalGremlinException.class)
     @ResponseStatus(HttpStatus.OK)
     public Response exceptionHandler(IllegalGremlinException e) {
-        log.debug("Illegal Gremlin request: {}", e.getMessage());
+        log.debug("hubble.illegal_gremlin_request");
         String message = this.handleMessage(e.getMessage(), e.args());
         closeRequestClient();
         return Response.builder()
@@ -183,8 +252,8 @@ public class ExceptionAdvisor {
     @ExceptionHandler(UnauthorizedException.class)
     @ResponseStatus(HttpStatus.UNAUTHORIZED)
     public Response exceptionHandler(UnauthorizedException e) {
-        log.debug("Unauthorized request: {}", e.getMessage());
-        String message = e.getMessage();
+        log.debug("hubble.unauthorized_request");
+        String message = sanitize(e.getMessage());
         closeRequestClient();
         return Response.builder()
                        .status(Constant.STATUS_UNAUTHORIZED)
@@ -196,6 +265,70 @@ public class ExceptionAdvisor {
     protected HttpServletRequest getRequest() {
         return ((ServletRequestAttributes)
                 RequestContextHolder.getRequestAttributes()).getRequest();
+    }
+
+    private boolean isOperationsRequest() {
+        HttpServletRequest request = this.getRequest();
+        return request != null && request.getRequestURI() != null &&
+               request.getRequestURI().startsWith("/api/v1.3/operations");
+    }
+
+    private static final Pattern URL = Pattern.compile(
+            "(?i)https?://[^\\s]+", Pattern.CASE_INSENSITIVE);
+    private static final String SENSITIVE_KEY =
+            "(?:token|password|secret(?:[_-]?key)?|api[_-]?key|" +
+            "client[_-]?secret|service[_-]?secret|private[_-]?key|" +
+            "credential|endpoint)";
+    private static final Pattern SECRET_PARAMETER = Pattern.compile(
+            "(?i)([?&\\s]" + SENSITIVE_KEY + "=)[^&\\s]+",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern AUTHORIZATION_SECRET = Pattern.compile(
+            "(?i)(authorization\\s*[:=]\\s*(?:basic|bearer)\\s+)[^\\s,;]+",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern JSON_SECRET = Pattern.compile(
+            "(?i)([\"']" + SENSITIVE_KEY + "[\"']" +
+            "\\s*:\\s*[\"'])[^\"']*([\"'])",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern KEY_VALUE_SECRET = Pattern.compile(
+            "(?i)((?:" + SENSITIVE_KEY + ")\\s*[:=]\\s*)" +
+            "(?:\"[^\"]*\"|'[^']*'|[^\\s,;}&]+)",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern NETWORK_ENDPOINT = Pattern.compile(
+            "(?i)(?:/)?(?:\\d{1,3}\\.){3}\\d{1,3}:\\d+(?:/[^\\s]*)?");
+    private static final Pattern COOKIE_HEADER = Pattern.compile(
+            "(?im)((?:set-cookie|cookie)\\s*:\\s*).*?(?=\\r?$|\\\\[rn]|$)");
+    private static final Pattern PRIVATE_KEY = Pattern.compile(
+            "(?is)-----BEGIN [^-\\r\\n]*PRIVATE KEY-----.*?" +
+            "-----END [^-\\r\\n]*PRIVATE KEY-----");
+    private static final Pattern WINDOWS_PATH = Pattern.compile(
+            "(?i)\\b[a-z]:\\\\(?:[^\\s,;:\"'<>|]+\\\\)*" +
+            "[^\\s,;:\"'<>|]*");
+    private static final Pattern UNIX_PATH = Pattern.compile(
+            "(?i)/(?:Users|home|root|private|var|etc|opt|tmp|srv|mnt|" +
+            "Volumes|usr/local)(?:/[^\\s,;:\"'<>]*)*");
+
+    static String sanitize(String value) {
+        if (value == null) {
+            return "request_failure";
+        }
+        String sanitized = PRIVATE_KEY.matcher(value)
+                                      .replaceAll("[REDACTED]");
+        sanitized = COOKIE_HEADER.matcher(sanitized)
+                                 .replaceAll("$1[REDACTED]");
+        sanitized = AUTHORIZATION_SECRET.matcher(sanitized)
+                                               .replaceAll("$1[REDACTED]");
+        sanitized = JSON_SECRET.matcher(sanitized)
+                               .replaceAll("$1[REDACTED]$2");
+        sanitized = KEY_VALUE_SECRET.matcher(sanitized)
+                                    .replaceAll("$1[REDACTED]");
+        sanitized = SECRET_PARAMETER.matcher(sanitized)
+                                           .replaceAll("$1[REDACTED]");
+        sanitized = URL.matcher(sanitized).replaceAll("[REDACTED]");
+        sanitized = NETWORK_ENDPOINT.matcher(sanitized)
+                                    .replaceAll("[REDACTED]");
+        sanitized = WINDOWS_PATH.matcher(sanitized)
+                                .replaceAll("[REDACTED]");
+        return UNIX_PATH.matcher(sanitized).replaceAll("[REDACTED]");
     }
 
     public void closeRequestClient() {
@@ -221,9 +354,9 @@ public class ExceptionAdvisor {
         try {
             message = this.messageSourceHandler.getMessage(message, strArgs);
         } catch (Throwable e) {
-            log.error(e.getMessage(), e);
+            log.error("hubble.message_resolution_failed");
         }
-        return message;
+        return sanitize(message);
     }
 
     private String handleErrorCode(String message) {
@@ -241,10 +374,8 @@ public class ExceptionAdvisor {
                                                                attach.toArray());
                 }
             } catch (Exception e) {
-                throw new RuntimeException(
-                        String.format("Fail to handle error code for message " +
-                                      "%s, error: %s", message,
-                                      e.getMessage()));
+                log.error("hubble.error_code_parse_failed");
+                throw new RuntimeException("failed_to_handle_error_code");
             }
         }
         return message;

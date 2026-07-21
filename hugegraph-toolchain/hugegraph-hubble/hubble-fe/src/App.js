@@ -20,13 +20,17 @@ import Route from './routes';
 import 'antd/dist/antd.css';
 import './App.scss';
 import './App.css';
+import './styles/workbench.scss';
 import Layout from './layout.ant';
+import {AuthContextProvider} from './auth/AuthContext';
 
 function App() {
 
     return (
         <div>
-            <Route element={<Layout />} />
+            <AuthContextProvider>
+                <Route element={<Layout />} />
+            </AuthContextProvider>
         </div>
     );
 };

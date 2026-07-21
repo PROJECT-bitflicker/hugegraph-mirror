@@ -20,28 +20,36 @@
  * @file Gremlin语法分析 Header
  */
 
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Alert, Input, Tabs, Tag} from 'antd';
+import {Alert, Button, Input, Tabs, Tag} from 'antd';
+import {DownOutlined, UpOutlined} from '@ant-design/icons';
 import CodeEditor from '../../../../components/CodeEditor';
 import {ANALYSIS_TYPE} from '../../../../utils/constants';
-import ContentCommon from '../ContentCommon';
+import {PrimaryActions, SecondaryActions} from '../ContentCommon';
 import c from './index.module.scss';
 
 const {GREMLIN, CYPHER, TEXT2GQL} = ANALYSIS_TYPE;
-
-const isFavoritePopoverOpen = (visible, activeTab, tabKey) => {
-    return visible && activeTab === tabKey;
-};
 
 const QueryBar = props => {
     const {t} = useTranslation();
     const {...args} = props;
 
-    const {codeEditorContent, setCodeEditorContent, activeTab, onTabsChange} = args;
+    const {
+        codeEditorContent,
+        setCodeEditorContent,
+        activeTab,
+        onTabsChange,
+        onExecute,
+        isExecuting,
+    } = args;
 
-    const [isEmptyQuery, setIsEmptyQuery] = useState(true);
+    const [isEmptyQuery, setIsEmptyQuery] = useState(() => !codeEditorContent);
     const [favoriteCardVisible, setFavoriteCardVisible] = useState(false);
+    const [isEditorExpanded, setEditorExpanded] = useState(true);
+    useEffect(() => {
+        setIsEmptyQuery(!codeEditorContent);
+    }, [codeEditorContent]);
 
     const handleCodeEditorChange = useCallback(
         value => {
@@ -63,56 +71,77 @@ const QueryBar = props => {
         [onTabsChange]
     );
 
+    const onExecution = useCallback(
+        () => {
+            if (!isEmptyQuery && !isExecuting) {
+                onExecute(activeTab);
+            }
+        },
+        [activeTab, isEmptyQuery, isExecuting, onExecute]
+    );
+
+    const toggleEditor = useCallback(() => {
+        setEditorExpanded(expanded => !expanded);
+    }, []);
+
+    const renderEditor = language => (
+        <div className={c.editorRegion}>
+            <Button
+                className={c.editorToggle}
+                type='text'
+                size='small'
+                icon={isEditorExpanded ? <UpOutlined /> : <DownOutlined />}
+                onClick={toggleEditor}
+                aria-expanded={isEditorExpanded}
+                aria-controls={`query-editor-${language}`}
+            >
+                {isEditorExpanded
+                    ? t('analysis.query.collapse')
+                    : t('analysis.query.expand')}
+            </Button>
+            {isEditorExpanded && (
+                <div className={c.editorShell} id={`query-editor-${language}`}>
+                    <CodeEditor
+                        value={codeEditorContent}
+                        onChange={handleCodeEditorChange}
+                        onExecutionShortcut={onExecution}
+                        lang={language}
+                        minHeight={64}
+                        placeholder={language === 'gremlin'
+                            ? t('analysis.query.gremlin_placeholder')
+                            : t('analysis.query.cypher_placeholder')}
+                    />
+                    <div className={c.editorShortcutHints} aria-hidden='true'>
+                        <span>{t('analysis.query.shortcut_hint')}</span>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+
+    const commonActionProps = {
+        ...args,
+        isEmptyQuery,
+        favoriteCardVisible,
+        setFavoriteCardVisible,
+    };
+
     const tabItems = [
         {
             label: t('analysis.query.gremlin_tab'),
             key: GREMLIN,
-            children: (
-                <ContentCommon
-                    {...args}
-                    isEmptyQuery={isEmptyQuery}
-                    favoriteCardVisible={isFavoritePopoverOpen(
-                        favoriteCardVisible,
-                        activeTab,
-                        GREMLIN
-                    )}
-                    setFavoriteCardVisible={setFavoriteCardVisible}
-                >
-                    <CodeEditor
-                        value={codeEditorContent}
-                        onChange={handleCodeEditorChange}
-                        lang={'gremlin'}
-                    />
-                </ContentCommon>
-            ),
+            children: renderEditor('gremlin'),
         },
         {
             label: t('analysis.query.cypher_tab'),
             key: CYPHER,
-            children: (
-                <ContentCommon
-                    {...args}
-                    isEmptyQuery={isEmptyQuery}
-                    favoriteCardVisible={isFavoritePopoverOpen(
-                        favoriteCardVisible,
-                        activeTab,
-                        CYPHER
-                    )}
-                    setFavoriteCardVisible={setFavoriteCardVisible}
-                >
-                    <CodeEditor
-                        value={codeEditorContent}
-                        onChange={handleCodeEditorChange}
-                        lang={'cypher'}
-                    />
-                </ContentCommon>
-            ),
+            children: renderEditor('cypher'),
         },
         {
             label: (
                 <span>
                     {t('analysis.query.text2gql_tab')}
-                    <Tag color='blue'>
+                    <Tag className={c.text2gqlBadge}>
                         {t('analysis.query.text2gql_badge')}
                     </Tag>
                 </span>
@@ -140,6 +169,18 @@ const QueryBar = props => {
         },
     ];
 
+    const queryActions = activeTab === TEXT2GQL ? undefined : {
+        right: (
+            <div className={c.queryActions}>
+                <SecondaryActions
+                    {...commonActionProps}
+                    favoriteCardVisible={favoriteCardVisible}
+                />
+                <PrimaryActions {...commonActionProps} />
+            </div>
+        ),
+    };
+
     return (
         <div className={c.queryBar} id='queryBar'>
             <Tabs
@@ -149,10 +190,10 @@ const QueryBar = props => {
                 onChange={handleTabsChange}
                 items={tabItems}
                 size='small'
+                tabBarExtraContent={queryActions}
             />
         </div>
     );
 };
 
-export {isFavoritePopoverOpen};
 export default QueryBar;

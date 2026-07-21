@@ -33,9 +33,8 @@ import org.apache.hugegraph.options.HubbleOptions;
 import org.apache.hugegraph.service.auth.UserService;
 import org.apache.hugegraph.service.graphs.GraphsService;
 import org.apache.hugegraph.service.space.GraphSpaceService;
-import org.apache.hugegraph.structure.space.GraphSpace;
 import org.apache.hugegraph.util.E;
-import org.apache.hugegraph.util.Ex;
+import org.apache.hugegraph.util.PageUtil;
 import org.apache.hugegraph.util.UrlUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -54,6 +53,9 @@ import java.util.List;
 @RestController
 @RequestMapping(Constant.API_VERSION + "graphspaces")
 public class GraphSpaceController extends BaseController {
+    private static final int DEFAULT_MAX_GRAPH_NUMBER = 100;
+    private static final int DEFAULT_MAX_ROLE_NUMBER = 100;
+    private static final int DEFAULT_STORAGE_VALUE = 1000000;
     private static final int DEFAULT_MEMORY_VALUE = 128;
     private static final int DEFAULT_CPU_VALUE = 64;
 
@@ -100,11 +102,19 @@ public class GraphSpaceController extends BaseController {
                                   "total", 0);
         }
         if (all) {
-            return this.graphSpaceService.queryAllGs(
-                    this.authClient(null, null), query, createTime);
+            HugeClient client = this.authClient(null, null);
+            return this.userService.isSuperAdmin(client) ?
+                   this.graphSpaceService.queryAllGs(client, query,
+                                                     createTime) :
+                   this.graphSpaceService.queryAccessibleGs(client, query,
+                                                            createTime);
         }
-        return graphSpaceService.queryPage(this.authClient(null, null),
-                                           query, createTime, pageNo, pageSize);
+        HugeClient client = this.authClient(null, null);
+        return this.userService.isSuperAdmin(client) ?
+               graphSpaceService.queryPage(client, query, createTime,
+                                           pageNo, pageSize) :
+               PageUtil.page(graphSpaceService.queryAccessibleGs(
+                       client, query, createTime), pageNo, pageSize);
     }
 
     @GetMapping("{graphspace}/auth")
@@ -118,37 +128,27 @@ public class GraphSpaceController extends BaseController {
     }
 
     @GetMapping("{graphspace}")
-    public GraphSpaceEntity get(@PathVariable("graphspace") String graphspace) {
+    public Object get(@PathVariable("graphspace") String graphspace) {
         if (!isPdEnabled()) {
             // Return a minimal stub entity for non-PD mode
             GraphSpaceEntity stub = new GraphSpaceEntity();
             stub.setName(graphspace);
             stub.setNickname(graphspace);
-            return stub;
+            return this.graphSpaceService.toView(stub);
         }
         HugeClient client = this.authClient(null, null);
         // Get GraphSpace Info
-        return graphSpaceService.getWithAdmins(client, graphspace);
+        return graphSpaceService.toView(
+                graphSpaceService.getWithAdmins(client, graphspace));
     }
 
     @PostMapping
     public Object add(@RequestBody GraphSpaceEntity graphSpaceEntity) {
         E.checkArgument(isPdEnabled(),
                 "GraphSpace management is not supported in standalone mode");
+        HugeClient client = this.requireGraphSpaceAdministrator();
         // Create GraphSpace
-        HugeClient client = this.authClient(null, null);
-        if (graphSpaceEntity.getCpuLimit() <= 0) {
-            graphSpaceEntity.setCpuLimit(DEFAULT_CPU_VALUE);
-        }
-        if (graphSpaceEntity.getMemoryLimit() <= 0) {
-            graphSpaceEntity.setMemoryLimit(DEFAULT_MEMORY_VALUE);
-        }
-        if (graphSpaceEntity.getComputeCpuLimit() <= 0) {
-            graphSpaceEntity.setComputeCpuLimit(DEFAULT_CPU_VALUE);
-        }
-        if (graphSpaceEntity.getComputeMemoryLimit() <= 0) {
-            graphSpaceEntity.setComputeCpuLimit(DEFAULT_MEMORY_VALUE);
-        }
+        applyResourceDefaults(graphSpaceEntity);
 
         graphSpaceService.create(client, graphSpaceEntity.convertGraphSpace());
 
@@ -160,15 +160,39 @@ public class GraphSpaceController extends BaseController {
         return get(graphSpaceEntity.getName());
     }
 
+    static void applyResourceDefaults(GraphSpaceEntity graphSpaceEntity) {
+        if (graphSpaceEntity.getMaxGraphNumber() <= 0) {
+            graphSpaceEntity.setMaxGraphNumber(DEFAULT_MAX_GRAPH_NUMBER);
+        }
+        if (graphSpaceEntity.getMaxRoleNumber() <= 0) {
+            graphSpaceEntity.setMaxRoleNumber(DEFAULT_MAX_ROLE_NUMBER);
+        }
+        if (graphSpaceEntity.getCpuLimit() <= 0) {
+            graphSpaceEntity.setCpuLimit(DEFAULT_CPU_VALUE);
+        }
+        if (graphSpaceEntity.getMemoryLimit() <= 0) {
+            graphSpaceEntity.setMemoryLimit(DEFAULT_MEMORY_VALUE);
+        }
+        if (graphSpaceEntity.getComputeCpuLimit() <= 0) {
+            graphSpaceEntity.setComputeCpuLimit(DEFAULT_CPU_VALUE);
+        }
+        if (graphSpaceEntity.getComputeMemoryLimit() <= 0) {
+            graphSpaceEntity.setComputeMemoryLimit(DEFAULT_MEMORY_VALUE);
+        }
+        if (graphSpaceEntity.getStorageLimit() <= 0) {
+            graphSpaceEntity.setStorageLimit(DEFAULT_STORAGE_VALUE);
+        }
+    }
+
     @PutMapping("{graphspace}")
-    public GraphSpace update(@PathVariable("graphspace") String graphspace,
-                             @RequestBody GraphSpaceEntity graphSpaceEntity) {
+    public Object update(@PathVariable("graphspace") String graphspace,
+                         @RequestBody GraphSpaceEntity graphSpaceEntity) {
         E.checkArgument(isPdEnabled(),
                 "GraphSpace management is not supported in standalone mode");
+        HugeClient client = this.requireGraphSpaceAdministrator();
 
         graphSpaceEntity.setName(graphspace);
-
-        HugeClient client = this.authClient(null, null);
+        applyResourceDefaults(graphSpaceEntity);
 
         // Update graphspace
         graphSpaceService.update(client, graphSpaceEntity.convertGraphSpace());
@@ -196,10 +220,9 @@ public class GraphSpaceController extends BaseController {
     public void delete(@PathVariable("graphspace") String graphspace) {
         E.checkArgument(isPdEnabled(),
                 "GraphSpace management is not supported in standalone mode");
+        HugeClient client = this.requireGraphSpaceAdministrator();
         E.checkArgument(StringUtils.isNotEmpty(graphspace), "graphspace " +
                 "must not null");
-
-        HugeClient client = this.authClient(null, null);
 
         // Delete graphspace admin
         userService.listGraphSpaceAdmin(client, graphspace).forEach(u -> {
@@ -214,6 +237,7 @@ public class GraphSpaceController extends BaseController {
     public Object initBuiltIn(@RequestBody BuiltInEntity entity) {
         E.checkArgument(isPdEnabled(),
                 "Built-in initialization is not supported in standalone mode");
+        HugeClient client = this.requireGraphSpaceAdministrator();
         GraphConnection connection = new GraphConnection();
 
         String url = this.getUrl();
@@ -228,8 +252,6 @@ public class GraphSpaceController extends BaseController {
         connection.setGraphSpace(Constant.BUILT_IN);
         connection.setToken(this.getToken());
 
-        HugeClient client = this.authClient(null, null);
-        Ex.check(userService.isSuperAdmin(client), "仅限系统管理员操作");
         if (entity.initSpace) {
             graphSpaceService.initBuiltIn(client);
         }

@@ -18,6 +18,9 @@
 
 package org.apache.hugegraph.controller.op;
 
+import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -31,24 +34,48 @@ import org.apache.hugegraph.common.Constant;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.controller.BaseController;
 import org.apache.hugegraph.options.HubbleOptions;
-import org.apache.hugegraph.util.E;
 
 @RestController
 @RequestMapping(Constant.API_VERSION + "dashboard")
 public class DashboardController extends BaseController {
+
+    private static final int HEALTH_TIMEOUT_MILLIS = 1500;
+
     @Autowired
     private HugeConfig config;
 
     @GetMapping
     public Map<String, Object> listOperations() {
         String address = config.get(HubbleOptions.DASHBOARD_ADDRESS);
-        E.checkArgument(StringUtils.isNotEmpty(address),
-                        "Please set 'dashboard.address' in config file " +
-                        "conf/hugegraph-hubble.properties.");
-
         Map<String, Object> result = new HashMap<>();
+        result.put("configured", StringUtils.isNotEmpty(address));
+        if (StringUtils.isEmpty(address)) {
+            return result;
+        }
         result.put("address", address);
-        result.put("protocol", config.get(HubbleOptions.SERVER_PROTOCOL));
+        String protocol = config.get(HubbleOptions.SERVER_PROTOCOL);
+        result.put("protocol", protocol);
+        result.put("available", this.isAvailable(protocol, address));
         return result;
+    }
+
+    private boolean isAvailable(String protocol, String address) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(
+                    protocol + "://" + address).openConnection();
+            connection.setConnectTimeout(HEALTH_TIMEOUT_MILLIS);
+            connection.setReadTimeout(HEALTH_TIMEOUT_MILLIS);
+            connection.setRequestMethod("GET");
+            connection.setInstanceFollowRedirects(false);
+            int status = connection.getResponseCode();
+            return status >= 200 && status < 400;
+        } catch (IOException e) {
+            return false;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
     }
 }

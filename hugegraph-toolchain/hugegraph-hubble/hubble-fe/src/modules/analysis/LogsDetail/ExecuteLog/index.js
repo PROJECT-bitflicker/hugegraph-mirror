@@ -20,11 +20,14 @@
  * @file gremlin表格 执行记录
  */
 
-import {useState, useCallback} from 'react';
+import {useState, useCallback, useMemo} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Button, Table, Space, Tag, Popconfirm} from 'antd';
+import {Button, Table, Space, Tag, Popconfirm, Tooltip, message} from 'antd';
 import ExecutionContent from '../../../../components/ExecutionContent';
 import FavoriteNameInput from '../../../../components/FavoriteNameInput';
+import ColumnSettings, {
+    useColumnSettings,
+} from '../../../../components/ColumnSettings';
 import {isValidFavoriteName} from '../../../../utils/rules';
 import c from './index.module.scss';
 
@@ -56,6 +59,8 @@ const statusColor =  {
 const FAILURE_REASON_KEYS = new Set([
     'GREMLIN_EXECUTION_FAILED',
 ]);
+const REQUIRED_EXECUTE_COLUMNS = ['action'];
+const DEFAULT_EXECUTE_COLUMN_PREFERENCES = {hidden: ['type']};
 
 export function failureReasonDescription(rowData, t) {
     if (rowData.status !== 'FAILED'
@@ -67,6 +72,16 @@ export function failureReasonDescription(rowData, t) {
 
 function getRowKey(item) {
     return item.id;
+}
+
+export async function copyStatement(content, t) {
+    try {
+        await navigator.clipboard.writeText(content);
+        message.success(t('analysis.logs.copy_success'));
+    }
+    catch (error) {
+        message.error(t('analysis.logs.copy_failed'));
+    }
 }
 
 const ExecuteLogActions = props => {
@@ -82,9 +97,19 @@ const ExecuteLogActions = props => {
         () => loadStatements(text, rowData, index),
         [index, loadStatements, rowData, text]
     );
+    const handleCopyStatement = useCallback(
+        () => copyStatement(rowData.content, t),
+        [rowData.content, t]
+    );
 
     return (
         <div className={c.manipulation}>
+            <Button type='link' onClick={handleLoadStatements}>
+                {t('analysis.logs.action.load_statement')}
+            </Button>
+            <Button type='link' onClick={handleCopyStatement}>
+                {t('analysis.logs.action.copy_statement')}
+            </Button>
             <Popconfirm
                 placement="left"
                 title={favoriteContent(rowData)}
@@ -97,9 +122,6 @@ const ExecuteLogActions = props => {
                     {t('analysis.logs.action.favorite')}
                 </Button>
             </Popconfirm>
-            <Button type='link' style={{marginLeft: '8px'}} onClick={handleLoadStatements}>
-                {t('analysis.logs.action.load_statement')}
-            </Button>
         </div>
     );
 };
@@ -173,46 +195,57 @@ const ExecuteLog = props => {
         [favoriteName, onFavoraiteName, t]
     );
 
-    const typeDesc = type => {
+    const typeDesc = useCallback(type => {
         const typeKey = EXECUTE_TYPE_KEY[type];
         return typeKey ? t(`analysis.logs.type.${typeKey}`) : type;
-    };
+    }, [t]);
 
-    const statusDesc = status => {
+    const statusDesc = useCallback(status => {
         const statusKey = EXECUTE_STATUS_KEY[status];
         return statusKey ? t(`analysis.logs.status.${statusKey}`) : status;
-    };
+    }, [t]);
 
-    const executeLogColumns = [
+    const executeLogColumns = useMemo(() => [
         {
+            key: 'time',
             title: t('analysis.logs.column.time'),
             dataIndex: 'create_time',
             width: '20%',
         },
         {
-            title: t('analysis.logs.column.type'),
-            dataIndex: 'type',
-            width: '15%',
-            render: type => typeDesc(type),
-        },
-        {
+            key: 'content',
             title: t('analysis.logs.column.content'),
             dataIndex: 'content',
             width: '30%',
             render: (text, rowData, index) => {
-                return text.split('\n')[1] ? (
-                    <ExecutionContent
-                        content={text}
-                        highlightText=""
-                    />
-                ) : (
-                    <div className={c.breakWord}>
-                        {text}
-                    </div>
+                return (
+                    <Tooltip
+                        placement='top'
+                        title={t('analysis.logs.click_to_copy')}
+                    >
+                        <button
+                            type='button'
+                            className={c.statementCell}
+                            aria-label={`${t('analysis.logs.click_to_copy')}: ${text}`}
+                            onClick={() => copyStatement(text, t)}
+                        >
+                            {text.split('\n')[1] ? (
+                                <ExecutionContent
+                                    content={text}
+                                    highlightText=""
+                                />
+                            ) : (
+                                <span className={c.breakWord}>
+                                    {text}
+                                </span>
+                            )}
+                        </button>
+                    </Tooltip>
                 );
             },
         },
         {
+            key: 'status',
             title: t('analysis.logs.column.status'),
             dataIndex: 'status',
             width: '10%',
@@ -233,11 +266,13 @@ const ExecuteLog = props => {
             },
         },
         {
+            key: 'duration',
             title: t('analysis.logs.column.duration'),
             dataIndex: 'duration',
             width: '10%',
         },
         {
+            key: 'action',
             title: t('analysis.logs.column.action'),
             dataIndex: 'manipulation',
             width: '15%',
@@ -257,12 +292,61 @@ const ExecuteLog = props => {
                 );
             },
         },
-    ];
+        {
+            key: 'type',
+            title: t('analysis.logs.column.type'),
+            dataIndex: 'type',
+            width: '15%',
+            render: type => typeDesc(type),
+        },
+    ], [favoriteContent, favoriteName, loadStatements, onAddFavorite,
+        onFavoriteCard, statusDesc, t, typeDesc]);
+
+    const columnSettings = useColumnSettings(
+        executeLogColumns,
+        'hubble.analysis.execution-log.columns.v2',
+        REQUIRED_EXECUTE_COLUMNS,
+        DEFAULT_EXECUTE_COLUMN_PREFERENCES
+    );
+    const columnSettingsLabels = useMemo(
+        () => ({
+            title: t('analysis.logs.column_settings.title'),
+            moveUp: t('analysis.logs.column_settings.move_up'),
+            moveDown: t('analysis.logs.column_settings.move_down'),
+            reset: t('analysis.logs.column_settings.reset'),
+        }),
+        [t]
+    );
+    const displayedColumns = useMemo(
+        () => columnSettings.columns.map((column, index) => {
+            if (index !== columnSettings.columns.length - 1) {
+                return column;
+            }
+            return {
+                ...column,
+                title: (
+                    <div className={c.columnHeaderTools}>
+                        <span>{column.title}</span>
+                        <ColumnSettings
+                            columns={executeLogColumns}
+                            preferences={columnSettings.preferences}
+                            setPreferences={columnSettings.setPreferences}
+                            reset={columnSettings.reset}
+                            requiredKeys={REQUIRED_EXECUTE_COLUMNS}
+                            labels={columnSettingsLabels}
+                        />
+                    </div>
+                ),
+            };
+        }),
+        [columnSettings.columns, columnSettings.preferences, columnSettings.reset,
+            columnSettings.setPreferences, columnSettingsLabels, executeLogColumns]
+    );
 
 
     return (
         <Table
-            columns={executeLogColumns}
+            columns={displayedColumns}
             dataSource={executeLogsDataRecords}
             rowKey={getRowKey}
             pagination={{
@@ -273,6 +357,7 @@ const ExecuteLog = props => {
                 current: pageExecute,
                 pageSize: pageSize,
             }}
+            scroll={{y: 360}}
             loading={isLoading}
         />
     );

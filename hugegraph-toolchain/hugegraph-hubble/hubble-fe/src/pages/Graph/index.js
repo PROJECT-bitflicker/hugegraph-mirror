@@ -33,6 +33,7 @@ import {
     Spin,
     Alert,
     Tooltip,
+    Empty,
 } from 'antd';
 import {useState, useEffect, useCallback} from 'react';
 import {useTranslation} from 'react-i18next';
@@ -51,6 +52,11 @@ import moment from 'moment';
 import GraphCard from './Card';
 import ClearGraphConfirmModal from './ClearGraphConfirmModal';
 import KeyboardAction from '../../components/KeyboardAction';
+import {getResourceDisplayName} from '../../utils/displayName';
+import {useAuthContext} from '../../auth/AuthContext';
+import {sanitizePublicError} from '../../utils/publicError';
+import EditableNicknameCell from './EditableNicknameCell';
+import {TopbarPageContextSlot} from '../../components/Topbar/PageContextSlot';
 
 const GraphRowAction = ({onAction, graph, children}) => {
     const handleClick = useCallback(() => onAction(graph), [graph, onAction]);
@@ -58,12 +64,36 @@ const GraphRowAction = ({onAction, graph, children}) => {
     return <Button type='link' onClick={handleClick}>{children}</Button>;
 };
 
+const GraphNicknameColumn = ({canEdit, onSave, row, t}) => {
+    const handleSave = useCallback(nickname => onSave(row, nickname), [onSave, row]);
+    const renderValue = useCallback(displayName => (
+        <Link to={`/gremlin/${row.graphspace || 'DEFAULT'}/${row.name}`}>
+            {displayName}
+            {row.default && (
+                <span className={style.default}>
+                    {t('common.label.default')}
+                </span>
+            )}
+        </Link>
+    ), [row, t]);
+
+    return (
+        <EditableNicknameCell
+            canEdit={canEdit}
+            name={row.name}
+            nickname={row.nickname}
+            onSave={handleSave}
+            renderValue={renderValue}
+        />
+    );
+};
+
 const Graph = () => {
     const {t} = useTranslation();
     const [data, setData] = useState([]);
     const [dateData, setDateData] = useState('');
     const [graphname, setGraphname] = useState('');
-    const [graphspaceInfo, setGraphspaceInfo] = useState({});
+    const [searchText, setSearchText] = useState('');
     const [editLayer, setEditLayer] = useState(false);
     const [viewLayer, setViewLayer] = useState(false);
     const [selectGraph, setSelectGraph] = useState('');
@@ -75,9 +105,14 @@ const Graph = () => {
     const [clearSelection, setClearSelection] = useState(null);
     const {graphspace} = useParams();
     const navigate = useNavigate();
+    const {context: authContext} = useAuthContext();
     const pdMode = isPdEnabled();
     const graphCreateEnabled = isGraphCreateEnabled(pdMode);
     const graphDefaultMutationEnabled = isGraphDefaultMutationEnabled(pdMode);
+    const adminGraphspaces = authContext?.scopes?.admin_graphspaces ?? [];
+    const canUpdateGraphspace = value => authContext?.role === 'SUPERADMIN'
+        || authContext?.scopes?.all_graphspaces === true
+        || adminGraphspaces.includes(value);
 
     const handlePagination = useCallback(current => {
         setPagination({...pagination, current});
@@ -97,6 +132,18 @@ const Graph = () => {
         setRefresh(!refresh);
     }, [refresh]);
 
+    const handleSearchTextChange = useCallback(event => {
+        setSearchText(event.target.value);
+    }, []);
+
+    const handleClearFilters = useCallback(() => {
+        setDateData('');
+        setGraphname('');
+        setSearchText('');
+        setPagination(value => ({...value, current: 1}));
+        setRefresh(value => !value);
+    }, []);
+
     const showEditLayer = useCallback(() => {
         setEditLayer(true);
         setSelectGraph('');
@@ -107,7 +154,7 @@ const Graph = () => {
         setEditLayer(true);
     }, []);
 
-    const clearData = useCallback(graph => {
+    const clearGraph = useCallback(graph => {
         setClearSelection({graph});
     }, []);
 
@@ -122,7 +169,7 @@ const Graph = () => {
     }, []);
 
     const handleClearConfirm = useCallback(() => {
-        return api.manage.clearGraphData(graphspace, clearSelection.graph);
+        return api.manage.clearGraph(graphspace, clearSelection.graph);
     }, [clearSelection, graphspace]);
 
     const showSchema = useCallback(graph => {
@@ -214,32 +261,90 @@ const Graph = () => {
     }, []);
 
     const handleDatePickerChange = useCallback((_, val) => setDateData(val), []);
+    const hasFilters = Boolean(dateData || graphname);
 
-    const handleGotoMeta = useCallback(item => {
-        navigate(`/graphspace/${item.graphspace || 'DEFAULT'}/graph/${item.name}/meta`);
-    }, [navigate]);
+    const saveNickname = useCallback(async (row, nickname) => {
+        const rowGraphspace = row.graphspace || graphspace;
+        const fallbackError = t('common.msg.operation_failed');
+        try {
+            const update = await api.manage.updateGraph(
+                rowGraphspace,
+                row.name,
+                {nickname},
+                {suppressBusinessErrorToast: true}
+            );
+            if (update.status !== 200) {
+                throw new Error(sanitizePublicError(update.message, fallbackError));
+            }
 
-    const handleGotoAnalysis = useCallback(item => {
-        navigate(`/gremlin/${item.graphspace || 'DEFAULT'}/${item.name}`);
-    }, [navigate]);
+            const detail = await api.manage.getGraph(rowGraphspace, row.name, {
+                suppressBusinessErrorToast: true,
+            });
+            if (detail.status !== 200) {
+                throw new Error(sanitizePublicError(detail.message, fallbackError));
+            }
+
+            const serverNickname = detail.data?.nickname ?? '';
+            setData(current => current.map(item => (
+                item.name === row.name && (item.graphspace || graphspace) === rowGraphspace
+                    ? {...item, ...detail.data, nickname: serverNickname}
+                    : item
+            )));
+            return serverNickname;
+        }
+        catch (error) {
+            const errorMessage = error?.response?.data?.message || error?.message;
+            throw new Error(sanitizePublicError(errorMessage, fallbackError));
+        }
+    }, [graphspace, t]);
+
+    const emptyState = (
+        <Empty
+            description={hasFilters
+                ? t('graph.empty.filtered_description')
+                : t('graph.empty.description')}
+        >
+            {hasFilters ? (
+                <Button onClick={handleClearFilters}>
+                    {t('graph.empty.clear_filters')}
+                </Button>
+            ) : (
+                <Space direction='vertical' size={8}>
+                    {graphCreateEnabled && (
+                        <Button type='primary' onClick={showEditLayer}>
+                            {t('graph.empty.create')}
+                        </Button>
+                    )}
+                    <span className={style.empty_demo_hint}>
+                        {t('graph.empty.demo_prerequisite')}
+                    </span>
+                    <Link to='/task'>{t('graph.empty.view_demo')}</Link>
+                </Space>
+            )}
+        </Empty>
+    );
 
     const columns = [
         {
             title: t('graph.col.name'),
             render: row => (
-                <Link to={`/gremlin/${row.graphspace || 'DEFAULT'}/${row.name}`}>
-                    {row.nickname}
-                    {row.default && (
-                        <span className={style.default}>
-                            {t('common.label.default')}
-                        </span>
-                    )}
-                </Link>
+                <GraphNicknameColumn
+                    canEdit={canUpdateGraphspace(row.graphspace || graphspace)}
+                    onSave={saveNickname}
+                    row={row}
+                    t={t}
+                />
             ),
         },
         {
             title: t('graph.detail.graphspace'),
             dataIndex: 'graphspace_nickname',
+            render: (nickname, row) => {
+                const graphspaceName = row.graphspace || graphspace;
+                return graphspaceName === DEFAULT_GRAPHSPACE
+                    ? t('graphspace.default_name')
+                    : getResourceDisplayName(graphspaceName, nickname);
+            },
         },
         {
             title: t('graph.col.create_time'),
@@ -272,10 +377,10 @@ const Graph = () => {
                             {t('graph.menu.meta_config')}
                         </Link>
                         {(row.default)
-                            ? <span className={style.disable}>{t('graph.menu.clear_data')}</span>
+                            ? <span className={style.disable}>{t('graph.menu.clear_graph')}</span>
                             : (
-                                <GraphRowAction onAction={clearData} graph={row.name}>
-                                    {t('graph.menu.clear_data')}
+                                <GraphRowAction onAction={clearGraph} graph={row.name}>
+                                    {t('graph.menu.clear_graph')}
                                 </GraphRowAction>
                             )}
                         {(row.graphspace === 'neizhianli')
@@ -288,13 +393,6 @@ const Graph = () => {
                         <GraphRowAction onAction={showSchema} graph={row.name}>
                             {t('graph.menu.view_schema')}
                         </GraphRowAction>
-                        {(row.graphspace === 'neizhianli')
-                            ? <span className={style.disable}>{t('common.action.edit')}</span>
-                            : (
-                                <GraphRowAction onAction={editGraph} graph={row.name}>
-                                    {t('common.action.edit')}
-                                </GraphRowAction>
-                            )}
                         {graphDefaultMutationEnabled && (
                             row.default
                                 ? <span className={style.disable}>{t('graph.menu.set_default')}</span>
@@ -325,25 +423,16 @@ const Graph = () => {
 
     const getMenus = item => [
         {
-            key: '0',
-            label: t('graph.menu.enter_analysis'),
-            onClick: () => handleGotoAnalysis(item),
-        },
-        {
-            key: '1',
-            label: t('graph.menu.meta_config'),
-            onClick: () => handleGotoMeta(item),
-        },
-        {
-            key: '2',
+            key: 'clear',
+            danger: true,
             disabled: item.default,
             label: item.default
-                ? <span className={style.disable}>{t('graph.menu.clear_data')}</span>
-                : t('graph.menu.clear_data'),
-            onClick: item.default ? undefined : () => clearData(item.name),
+                ? <span className={style.disable}>{t('graph.menu.clear_graph')}</span>
+                : t('graph.menu.clear_graph'),
+            onClick: item.default ? undefined : () => clearGraph(item.name),
         },
         graphDefaultMutationEnabled && {
-            key: '4',
+            key: 'default',
             disabled: item.default,
             label: item.default
                 ? <span className={style.disable}>{t('graph.menu.set_default')}</span>
@@ -351,12 +440,7 @@ const Graph = () => {
             onClick: item.default ? undefined : () => handleSetDefault(item.name),
         },
         {
-            key: '5',
-            label: t('graph.menu.view_schema'),
-            onClick: () => showSchema(item.name),
-        },
-        {
-            key: '6',
+            key: 'edit',
             disabled: item.graphspace === 'neizhianli',
             label: item.graphspace === 'neizhianli'
                 ? <span className={style.disable}>{t('common.action.edit')}</span>
@@ -365,7 +449,8 @@ const Graph = () => {
                 ? undefined : () => editGraph(item.name),
         },
         {
-            key: '7',
+            key: 'delete',
+            danger: true,
             disabled: item.graphspace === 'neizhianli',
             label: item.graphspace === 'neizhianli'
                 ? <span className={style.disable}>{t('common.action.delete')}</span>
@@ -374,7 +459,7 @@ const Graph = () => {
                 ? undefined : () => deleteGraph(item.name),
         },
         graphCreateEnabled && {
-            key: '8',
+            key: 'clone',
             disabled: true,
             label: (
                 <Tooltip title={t('graph.clone.unavailable')}>
@@ -387,22 +472,6 @@ const Graph = () => {
             ),
         },
     ].filter(Boolean);
-
-    useEffect(() => {
-        if (!pdMode && graphspace === DEFAULT_GRAPHSPACE) {
-            setGraphspaceInfo({name: DEFAULT_GRAPHSPACE, nickname: DEFAULT_GRAPHSPACE});
-            return;
-        }
-
-        api.manage.getGraphSpace(graphspace).then(res => {
-            if (res.status === 200) {
-                setGraphspaceInfo(res.data);
-                return;
-            }
-
-            message.error(res.message);
-        });
-    }, [graphspace, pdMode]);
 
     useEffect(() => {
         setLoading(true);
@@ -432,31 +501,38 @@ const Graph = () => {
 
     return (
         <Spin spinning={loading}>
+            <TopbarPageContextSlot>
+                <Radio.Group
+                    role='radiogroup'
+                    aria-label={t('graph.view_mode')}
+                    options={[
+                        {label: t('common.label.view_mode'), value: 'image'},
+                        {label: t('common.label.list_mode'), value: 'list'},
+                    ]}
+                    optionType='button'
+                    buttonStyle='solid'
+                    value={listType}
+                    onChange={handleListType}
+                />
+            </TopbarPageContextSlot>
             <PageHeader
                 ghost={false}
                 onBack={handleBack}
-                title={pdMode
-                    ? (graphspaceInfo.nickname ?? graphspace) + ` - ${t('graph.title')}`
-                    : t('graph.title')}
+                title={t('graph.title')}
             >
                 <Row justify='space-between'>
                     <Col>
-                        <DatePicker onChange={handleDatePickerChange} />
+                        <DatePicker
+                            value={dateData ? moment(dateData) : null}
+                            onChange={handleDatePickerChange}
+                        />
                     </Col>
                     <Col>
                         <Space>
-                            <Radio.Group
-                                options={[
-                                    {label: t('common.label.view_mode'), value: 'image'},
-                                    {label: t('common.label.list_mode'), value: 'list'},
-                                ]}
-                                optionType='button'
-                                buttonStyle='solid'
-                                defaultValue={'image'}
-                                onChange={handleListType}
-                            />
                             <Input.Search
                                 onSearch={handleSearch}
+                                onChange={handleSearchTextChange}
+                                value={searchText}
                                 placeholder={t('graph.search_placeholder')}
                             />
                         </Space>
@@ -470,25 +546,18 @@ const Graph = () => {
                         showIcon
                         type='error'
                         message={t('graph.unavailable')}
+                        action={(
+                            <Button size='small' onClick={handleRefresh}>
+                                {t('common.action.retry')}
+                            </Button>
+                        )}
                     />
                 )}
                 {listType === 'image'
                     ? (
                         <>
+                            {!listUnavailable && data.length === 0 && emptyState}
                             <Row gutter={[10, 10]} justify='start'>
-                                {graphCreateEnabled && (
-                                    <Col span={8} key='add'>
-                                        <KeyboardAction
-                                            onAction={showEditLayer}
-                                            aria-label={t('graph.create')}
-                                        >
-                                            <Card className={style.add_card}>
-                                                <Space><PlusOutlined />{t('graph.create')}</Space>
-                                            </Card>
-                                        </KeyboardAction>
-                                    </Col>
-                                )}
-
                                 {data.map(item => {
                                     const menus = getMenus(item);
 
@@ -501,6 +570,18 @@ const Graph = () => {
                                         </Col>
                                     );
                                 })}
+                                {graphCreateEnabled && data.length > 0 && (
+                                    <Col span={8} key='add'>
+                                        <KeyboardAction
+                                            onAction={showEditLayer}
+                                            aria-label={t('graph.create')}
+                                        >
+                                            <Card className={style.add_card}>
+                                                <Space><PlusOutlined />{t('graph.create')}</Space>
+                                            </Card>
+                                        </KeyboardAction>
+                                    </Col>
+                                )}
                             </Row>
                             <br />
                             <Row justify='end'>
@@ -510,6 +591,7 @@ const Graph = () => {
                                         pageSize={pagination.pageSize}
                                         total={pagination.total}
                                         onChange={handlePagination}
+                                        showSizeChanger={false}
                                     />
                                 </Col>
                             </Row>
@@ -532,6 +614,8 @@ const Graph = () => {
                             <Table
                                 columns={columns}
                                 dataSource={data}
+                                rowKey='name'
+                                locale={{emptyText: listUnavailable ? null : emptyState}}
                                 pagination={pagination}
                                 onChange={handleTable}
                             />

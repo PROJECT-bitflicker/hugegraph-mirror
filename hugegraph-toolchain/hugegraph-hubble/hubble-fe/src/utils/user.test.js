@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import {clearUser, getUser, isAdmin} from './user';
+import {clearUser, getUser, scopedStorageKey, setUser} from './user';
 
 describe('user storage helpers', () => {
     beforeEach(() => {
@@ -27,7 +27,14 @@ describe('user storage helpers', () => {
         expect(getUser()).toEqual({});
     });
 
-    test('treats missing session user as a non-admin user', () => {
-        expect(isAdmin()).toBe(false);
+    test('scopes persistent browser state to the authenticated identity', () => {
+        setUser({id: 'opaque-id', user_name: 'alice@example.com'});
+
+        expect(scopedStorageKey('hubble.query'))
+            .toBe('hubble.query.alice%40example.com');
+    });
+
+    test('keeps pre-login state separate from signed-in keys', () => {
+        expect(scopedStorageKey('hubble.query')).toBe('hubble.query');
     });
 });

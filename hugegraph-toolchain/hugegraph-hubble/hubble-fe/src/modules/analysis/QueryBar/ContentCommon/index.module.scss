@@ -16,44 +16,64 @@
  * under the License.
  */
 
-.tabContent {
+.actionBar,
+.secondaryActions,
+.primaryActions,
+.executionControl {
     display: flex;
+    align-items: center;
+}
+
+.actionBar {
     justify-content: space-between;
-    padding: 10px 10px;
-
-    .leftHeader {
-        width: 90%;
-
-        .btnGroup {
-            width: 600px;
-
-            .questionCircleIcon {
-                margin: 0 24px 0 10px;
-            }
-
-            .btn {
-                position: relative;
-                margin: 10px 10px 6px 0px;
-            }
-        }
-    }
-
-    .showMoreButton {
-        cursor: pointer;
-        user-select: none;
-    }
+    gap: 16px;
 }
 
-.hidden {
-    display: none;
+.secondaryActions {
+    gap: 8px;
+    padding-right: 12px;
+    white-space: nowrap;
 }
 
-.tabContentCollpased {
-    justify-content: flex-end;
+.primaryActions {
+    gap: 10px;
+    padding-left: 12px;
+    white-space: nowrap;
+}
 
-    .leftHeader {
-        display: none;
-    }
+.shortcutHint {
+    color: #667085;
+    font-size: 12px;
+}
+
+.executionControl {
+    gap: 8px;
+}
+
+.executeButton {
+    min-width: 132px;
+    height: 36px;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.executionControl :global(.ant-tooltip-disabled-compatible-wrapper) {
+    display: inline-flex;
+}
+
+.executionControl :global(.ant-tooltip-disabled-compatible-wrapper .ant-btn) {
+    min-width: 132px;
+    height: 36px;
+}
+
+.modeButton {
+    min-width: 88px;
+    height: 32px;
+    color: #43516a;
+}
+
+.btn {
+    position: relative;
 }
 
 .favoriteModel {
@@ -67,5 +87,25 @@
 
     :global(.ant-popover-inner-content) {
         padding: 28px 24px 24px;
+    }
+}
+
+@media (max-width: 1366px) {
+    .secondaryActions,
+    .primaryActions {
+        padding-right: 6px;
+        padding-left: 6px;
+    }
+
+    .shortcutHint {
+        display: none;
+    }
+
+    .executeButton {
+        min-width: 120px;
+    }
+
+    .executionControl :global(.ant-tooltip-disabled-compatible-wrapper .ant-btn) {
+        min-width: 120px;
     }
 }

@@ -16,13 +16,14 @@
  * under the License.
  */
 
-import {ExclamationCircleOutlined, InfoOutlined} from '@ant-design/icons';
+import {InfoCircleOutlined, InfoOutlined} from '@ant-design/icons';
 import {Typography, Dropdown, Row, Col, Space, Progress, Card, Tooltip} from 'antd';
 import {Link, useNavigate} from 'react-router-dom';
 import moment from 'moment';
 import style from './index.module.scss';
 import React, {useCallback} from 'react';
 import {useTranslation} from 'react-i18next';
+import {getResourceDisplayName} from '../../utils/displayName';
 
 const showText = (val, suffix, unlimited, empty) => (
     val > 99999 ? (empty === undefined ? unlimited : empty) : `${val}${suffix}`
@@ -34,18 +35,21 @@ const formatPercent = percent => {
 
 const TitleField = ({item, onClick, onKeyDown}) => {
     const {t} = useTranslation();
+    const displayName = item.name === 'DEFAULT'
+        ? t('graphspace.default_name')
+        : getResourceDisplayName(item.name, item.nickname);
 
     return (
         <>
             <Typography.Text
                 style={{maxWidth: 244}}
                 ellipsis={{ellipsis: true}}
-                title={`${item.nickname}`}
+                title={`${displayName}`}
                 onClick={onClick}
                 onKeyDown={onKeyDown}
                 role='button'
                 tabIndex={0}
-            >{item.nickname}
+            >{displayName}
             </Typography.Text>
             <div className={style.subtitle}>
                 {item.default && (
@@ -57,7 +61,15 @@ const TitleField = ({item, onClick, onKeyDown}) => {
     );
 };
 
-const GraphSpaceCard = ({item, editGraphspace, deleteGraphspace, handleInit}) => {
+const GraphSpaceCard = ({
+    item,
+    editGraphspace,
+    deleteGraphspace,
+    handleInit,
+    canUpdate = true,
+    canDelete = true,
+    canInit = true,
+}) => {
     const navigate = useNavigate();
     const {t} = useTranslation();
 
@@ -80,52 +92,49 @@ const GraphSpaceCard = ({item, editGraphspace, deleteGraphspace, handleInit}) =>
         }
     }, [handleGotoGraph]);
 
-    const getMenu = item => ({
-        items: item.name === 'neizhianli'
-            ? [
-                {
-                    key: '1',
-                    label: (
-                        <Link to={`/graphspace/${item.name}/schema`}>
-                            {t('common.action.schema_manage')}
-                        </Link>
-                    ),
-                },
-                {
-                    key: '2',
+    const getMenu = item => {
+        const schema = {
+            key: 'schema',
+            label: (
+                <Link to={`/graphspace/${item.name}/schema`}>
+                    {t('common.action.schema_manage')}
+                </Link>
+            ),
+        };
+        if (item.name === 'neizhianli') {
+            return {
+                items: [schema, ...(canInit ? [{
+                    key: 'init',
                     label: t('common.action.init'),
                     onClick: handleInit,
-                },
-            ]
-            : [
-                {
-                    key: '1',
-                    label: (
-                        <Link to={`/graphspace/${item.name}/schema`}>
-                            {t('common.action.schema_manage')}
-                        </Link>
-                    ),
-                },
-                {
-                    key: '2',
+                }] : [])],
+            };
+        }
+        return {
+            items: [
+                schema,
+                ...(canUpdate ? [{
+                    key: 'edit',
                     label: t('common.action.edit'),
                     onClick: handleEdit,
-                },
-                {
-                    key: '3',
+                }] : []),
+                ...(canDelete ? [{
+                    key: 'delete',
                     disabled: item.default,
                     label: (item.default)
                         ? <span className={style.disable}>{t('common.action.delete')}</span>
                         : t('common.action.delete'),
                     onClick: item.default ? undefined : handleDelete,
-                },
+                }] : []),
             ],
-    });
+        };
+    };
 
     const unlimited = t('graphspace.unit.unlimited');
     const cpu = showText(item.cpu_limit, t('graphspace.unit.cpu'), unlimited);
     const memory = showText(item.memory_limit, t('graphspace.unit.memory'), unlimited);
     const storage = showText(item.storage_limit, t('graphspace.unit.memory'), unlimited);
+    const statisticDate = item.statistic?.date;
 
     return (
         <Card
@@ -157,21 +166,28 @@ const GraphSpaceCard = ({item, editGraphspace, deleteGraphspace, handleInit}) =>
             )}
             actions={
                 [
-                    <Space key="1">
-                        <span>{t('graphspace.card.vertex')}: {item.statistic?.vertex}</span>
-                        <span>{t('graphspace.card.edge')}: {item.statistic?.edge}</span>
-                        <span>
+                    <Space key="1" size={8} wrap>
+                        <span>{t('graphspace.card.vertex')}: {item.statistic?.vertex ?? '-'}</span>
+                        <span>{t('graphspace.card.edge')}: {item.statistic?.edge ?? '-'}</span>
+                        <Typography.Text type='secondary'>
+                            {statisticDate
+                                ? t('graphspace.card.daily_snapshot', {date: statisticDate})
+                                : t('graphspace.card.daily_update')}
+                        </Typography.Text>
+                        <span aria-label={t('graphspace.card.statistic_help')}>
                             <Tooltip title={(
                                 <>
                                     <div>{t('graphspace.card.daily_update')}</div>
-                                    <div>{t('graphspace.card.last_update', {
-                                        date: item.statistic.date,
-                                    })}
-                                    </div>
+                                    {statisticDate && (
+                                        <div>{t('graphspace.card.last_update', {
+                                            date: statisticDate,
+                                        })}
+                                        </div>
+                                    )}
                                 </>
                             )}
                             >
-                                <ExclamationCircleOutlined />
+                                <InfoCircleOutlined />
                             </Tooltip>
                         </span>
                     </Space>,

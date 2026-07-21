@@ -31,21 +31,73 @@ beforeEach(() => {
 });
 
 test('updates a graph with PUT JSON on the canonical route', () => {
-    manage.updateGraph('DEFAULT', 'g', {nickname: 'nick'});
+    const config = {suppressBusinessErrorToast: true};
+    manage.updateGraph('DEFAULT', 'g', {nickname: 'nick'}, config);
     expect(request.put).toHaveBeenCalledWith(
         '/graphspaces/DEFAULT/graphs/g',
-        {nickname: 'nick'}
+        {nickname: 'nick'},
+        config
+    );
+});
+
+test('creates a property with request error ownership controls', () => {
+    const config = {suppressBusinessErrorToast: true};
+    manage.addMetaProperty('DEFAULT', 'g', {name: 'created_at'}, config);
+
+    expect(request.post).toHaveBeenCalledWith(
+        '/graphspaces/DEFAULT/graphs/g/schema/propertykeys',
+        {name: 'created_at'},
+        config
+    );
+});
+
+test('applies Groovy Schema to an existing graph with page-owned errors', () => {
+    const config = {suppressBusinessErrorToast: true};
+    const data = {'schema-groovy': 'graph.schema().propertyKey("name").create()'};
+
+    manage.addGraphSchema('DEFAULT', 'g', data, config);
+
+    expect(request.post).toHaveBeenCalledWith(
+        '/graphspaces/DEFAULT/graphs/g/schema/groovy',
+        data,
+        config
     );
 });
 
 test('clears graph data with POST on the canonical route', () => {
-    manage.clearGraphData('DEFAULT', 'g');
+    manage.clearGraph('DEFAULT', 'g');
 
     expect(request.post).toHaveBeenCalledWith(
         '/graphspaces/DEFAULT/graphs/g/clear'
     );
     expect(request.get).not.toHaveBeenCalled();
-    expect(manage.clearGraphDataAndSchema).toBeUndefined();
+    expect(manage.clearGraphData).toBeUndefined();
+});
+
+test('loads the non-destructive sample through the target graph route', () => {
+    const config = {suppressBusinessErrorToast: true};
+    manage.loadSampleGraph('DEFAULT', 'g', 'loader', config);
+
+    expect(request.post).toHaveBeenCalledWith(
+        '/graphspaces/DEFAULT/graphs/g/sample',
+        undefined,
+        {...config, params: {dataset: 'loader'}}
+    );
+});
+
+test('keeps task-run error ownership controls out of query parameters', () => {
+    manage.getJobsList(
+        {taskid: '42'},
+        {suppressBusinessErrorToast: true}
+    );
+
+    expect(request.get).toHaveBeenCalledWith(
+        '/ingest/jobs/list',
+        {
+            params: {taskid: '42'},
+            suppressBusinessErrorToast: true,
+        }
+    );
 });
 
 test('reads the default graph from the canonical route', () => {

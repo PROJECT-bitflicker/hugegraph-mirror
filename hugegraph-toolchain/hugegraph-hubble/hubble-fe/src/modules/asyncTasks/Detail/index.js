@@ -59,6 +59,7 @@ const AsyncTaskDetail = props => {
         onPageChange,
         getAsynTaskList,
         asyncManageTaskData,
+        loading,
     } = props;
 
     const {graphSpace: currentGraphSpace, graph: currentGraph, isVermeer} = useContext(GraphAnalysisContext);
@@ -191,8 +192,14 @@ const AsyncTaskDetail = props => {
         {
             title: t('analysis.async_task.column.task_name'),
             dataIndex: 'task_name',
+            width: 220,
+            ellipsis: true,
             render: (task_name, rowData, index) => {
-                return (<Text ellipsis={{tooltip: task_name}}>{task_name}</Text>);
+                return (
+                    <Text className={c.taskName} ellipsis={{tooltip: task_name}}>
+                        {task_name}
+                    </Text>
+                );
             },
         },
         {
@@ -301,7 +308,14 @@ const AsyncTaskDetail = props => {
                             {t('analysis.async_task.batch_delete')}
                         </Button>
                     </div>
-                    <CloseOutlined onClick={clearSelectedRowKeys} />
+                    <Button
+                        type='text'
+                        className={c.clearSelection}
+                        aria-label={t('analysis.async_task.clear_selection')}
+                        title={t('analysis.async_task.clear_selection')}
+                        icon={<CloseOutlined />}
+                        onClick={clearSelectedRowKeys}
+                    />
                 </div>
             )}
             <Table
@@ -318,6 +332,7 @@ const AsyncTaskDetail = props => {
                     current: page,
                     pageSize: pageSize,
                 }}
+                loading={loading}
             />
         </div>
     );

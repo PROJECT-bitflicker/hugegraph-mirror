@@ -15,11 +15,13 @@
  * under the License.
  */
 
-import {fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {MemoryRouter} from 'react-router-dom';
 
 import * as api from '../../../api';
 import ConsoleItem from './index';
+import itemStyle from '../Item/index.module.scss';
+import {useOperationsCapabilities} from '../../../pages/Operations/capabilities';
 
 const mockMessageError = jest.fn();
 
@@ -27,6 +29,9 @@ jest.mock('../../../api', () => ({
     auth: {
         getDashboard: jest.fn(),
     },
+}));
+jest.mock('../../../pages/Operations/capabilities', () => ({
+    useOperationsCapabilities: jest.fn(),
 }));
 jest.mock('antd', () => ({
     ...jest.requireActual('antd'),
@@ -45,72 +50,153 @@ beforeEach(() => {
     });
     api.auth.getDashboard.mockResolvedValue({
         status: 200,
-        data: {address: '127.0.0.1:8092', protocol: 'http'},
+        data: {
+            configured: true,
+            available: true,
+            address: '127.0.0.1:8092',
+            protocol: 'http',
+        },
+    });
+    useOperationsCapabilities.mockReturnValue({
+        loading: false,
+        capabilities: [
+            'operations_health_read',
+            'operations_topology_read',
+            'operations_metrics_read',
+        ],
+        error: null,
     });
 });
 
-test('probes the configured Dashboard only after an explicit user click', async () => {
-    render(
-        <MemoryRouter
-            future={{
-                v7_relativeSplatPath: true,
-                v7_startTransition: true,
-            }}
-        >
-            <ConsoleItem />
-        </MemoryRouter>
-    );
+const renderConsole = () => render(
+    <MemoryRouter
+        future={{
+            v7_relativeSplatPath: true,
+            v7_startTransition: true,
+        }}
+    >
+        <ConsoleItem />
+    </MemoryRouter>
+);
 
-    const button = await screen.findByRole('button', {
-        name: 'navigation_page.cluster_manage',
+test('opens a configured and healthy Dashboard capability', async () => {
+    renderConsole();
+
+    const monitor = await screen.findByRole('button', {
+        name: 'navigation_page.advanced_monitoring',
     });
-    await waitFor(() => expect(button).not.toBeDisabled());
-    expect(window.fetch).not.toHaveBeenCalled();
+    await waitFor(() => expect(monitor).toBeEnabled());
+    fireEvent.click(monitor);
 
-    fireEvent.click(button);
+    expect(window.open).toHaveBeenCalledWith(
+        'http://127.0.0.1:8092/monitor/machine',
+        '_blank',
+        'noopener,noreferrer'
+    );
+});
 
-    await waitFor(() => expect(window.fetch).toHaveBeenCalledTimes(1));
-    expect(window.open).toHaveBeenCalledWith('about:blank', '_blank');
-    const popup = window.open.mock.results[0].value;
-    await waitFor(() => expect(popup.location.replace).toHaveBeenCalledWith(
-        'http://127.0.0.1:8092'
+test('links native operations independently of the optional Dashboard', async () => {
+    api.auth.getDashboard.mockResolvedValue({
+        status: 200,
+        data: {configured: false},
+    });
+    renderConsole();
+
+    expect(await screen.findByRole('button', {
+        name: 'navigation_page.cluster_overview',
+    })).toHaveAttribute('data-url', '/operations/overview');
+    expect(screen.getByRole('button', {
+        name: 'navigation_page.nodes',
+    })).toHaveAttribute('data-url', '/operations/nodes');
+    expect(screen.getByRole('button', {
+        name: 'navigation_page.alert_manage',
+    })).toHaveTextContent('navigation_page.coming_soon');
+    expect(screen.getByRole('group', {
+        name: 'navigation_page.alert_manage, navigation_page.coming_soon',
+    })).toHaveAttribute('tabindex', '0');
+});
+
+test('labels an unconfigured Dashboard instead of Coming Soon', async () => {
+    api.auth.getDashboard.mockResolvedValue({
+        status: 200,
+        data: {configured: false},
+    });
+    renderConsole();
+
+    const monitor = await screen.findByRole('button', {
+        name: 'navigation_page.advanced_monitoring',
+    });
+    await waitFor(() => expect(monitor).toHaveAttribute(
+        'title', expect.stringContaining('navigation_page.dashboard_external_context')
     ));
+    expect(screen.getAllByText('navigation_page.not_configured')).toHaveLength(1);
+    expect(screen.getByText('navigation_page.coming_soon')).toBeInTheDocument();
 });
 
-test('reports a blocked popup without probing the Dashboard', async () => {
-    window.open.mockReturnValue(null);
-    render(
-        <MemoryRouter
-            future={{
-                v7_relativeSplatPath: true,
-                v7_startTransition: true,
-            }}
-        >
-            <ConsoleItem />
-        </MemoryRouter>
-    );
+test('describes Dashboard as an optional external monitoring entry', () => {
+    const zh = require('../../../i18n/resources/zh-CN/modules/pages.json');
+    const en = require('../../../i18n/resources/en-US/modules/pages.json');
 
-    const button = await screen.findByRole('button', {
-        name: 'navigation_page.cluster_manage',
+    expect(zh.navigation_page.advanced_monitoring).toBe('外部高级 Dashboard');
+    expect(en.navigation_page.advanced_monitoring).toBe('External Advanced Dashboard');
+    expect(zh.navigation_page.dashboard_external_context).toContain('不影响');
+    expect(en.navigation_page.dashboard_external_context).toContain('does not affect');
+});
+
+test('disables a configured but unavailable Dashboard capability', async () => {
+    api.auth.getDashboard.mockResolvedValue({
+        status: 200,
+        data: {
+            configured: true,
+            available: false,
+            address: '127.0.0.1:8092',
+            protocol: 'http',
+        },
     });
-    await waitFor(() => expect(button).not.toBeDisabled());
-    fireEvent.click(button);
+    renderConsole();
 
-    expect(window.fetch).not.toHaveBeenCalled();
-    expect(mockMessageError).toHaveBeenCalledTimes(1);
-    expect(mockMessageError).toHaveBeenCalledWith(
-        'navigation_page.dashboard_popup_blocked'
+    const monitor = await screen.findByRole('button', {
+        name: 'navigation_page.advanced_monitoring',
+    });
+    await waitFor(() => expect(monitor).toHaveAttribute(
+        'title', expect.stringContaining('navigation_page.dashboard_external_context')
+    ));
+    expect(monitor).toHaveAttribute(
+        'title', expect.stringContaining('navigation_page.dashboard_unavailable')
     );
+    expect(monitor).toBeDisabled();
+    expect(screen.getAllByText('navigation_page.unavailable')).toHaveLength(1);
+    expect(screen.getByRole('status')).toHaveClass(itemStyle.reason);
+    expect(screen.getByRole('status')).toHaveTextContent(
+        'navigation_page.dashboard_external_context'
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
+        'navigation_page.dashboard_unavailable'
+    );
+    expect(screen.getByText('navigation_page.coming_soon')).toBeInTheDocument();
+    expect(window.open).not.toHaveBeenCalled();
 });
 
-test('shows why operations are disabled when Dashboard is unavailable', async () => {
-    api.auth.getDashboard.mockResolvedValue({status: 500});
-    render(
-        <MemoryRouter future={{v7_relativeSplatPath: true, v7_startTransition: true}}>
-            <ConsoleItem />
-        </MemoryRouter>
-    );
+test('shows a diagnostic state when Dashboard configuration cannot be read', async () => {
+    api.auth.getDashboard.mockRejectedValue(new Error('backend unavailable'));
+    await act(async () => {
+        renderConsole();
+        await Promise.resolve();
+    });
 
-    expect(await screen.findByText('navigation_page.dashboard_unavailable'))
-        .toBeInTheDocument();
+    const monitor = await screen.findByRole('button', {
+        name: 'navigation_page.advanced_monitoring',
+    });
+    await waitFor(() => expect(monitor).toHaveAttribute(
+        'title', expect.stringContaining('navigation_page.dashboard_external_context')
+    ));
+    expect(monitor).toHaveAttribute(
+        'title', expect.stringContaining('navigation_page.dashboard_unavailable')
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
+        'navigation_page.dashboard_external_context'
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
+        'navigation_page.dashboard_unavailable'
+    );
 });

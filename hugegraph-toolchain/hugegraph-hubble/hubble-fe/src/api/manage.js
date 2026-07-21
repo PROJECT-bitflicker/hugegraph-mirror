@@ -55,12 +55,20 @@ const addSchema = (graphspace, data, config) => {
     return request.post(`/graphspaces/${graphspace}/schematemplates`, data, config);
 };
 
-const getSchema = (graphspace, name) => {
-    return request.get(`graphspaces/${graphspace}/schematemplates/${name}`);
+const getSchema = (graphspace, name, config) => {
+    return request.get(`graphspaces/${graphspace}/schematemplates/${name}`, config);
 };
 
 const getGraphSchema = (graphspace, graph) => {
     return request.get(`/graphspaces/${graphspace}/graphs/${graph}/schema/groovy`);
+};
+
+const addGraphSchema = (graphspace, graph, data, config) => {
+    return request.post(
+        `/graphspaces/${graphspace}/graphs/${graph}/schema/groovy`,
+        data,
+        config
+    );
 };
 
 const exportSchema = (graphspace, graph) => {
@@ -75,7 +83,8 @@ const delSchema = (graphspace, name, config) => {
     return request.delete(`graphspaces/${graphspace}/schematemplates/${name}`, undefined, config);
 };
 
-export {getSchemaList, addSchema, updateSchema, getSchema, getGraphSchema, exportSchema, delSchema};
+export {getSchemaList, addSchema, updateSchema, getSchema, getGraphSchema,
+    addGraphSchema, exportSchema, delSchema};
 
 // 图
 const getGraphList = (graphspace, params, config = {}) => {
@@ -90,8 +99,8 @@ const addGraph = (graphspace, data) => {
     });
 };
 
-const updateGraph = (graphspace, graph, params) => {
-    return request.put(`/graphspaces/${graphspace}/graphs/${graph}`, params);
+const updateGraph = (graphspace, graph, params, config) => {
+    return request.put(`/graphspaces/${graphspace}/graphs/${graph}`, params, config);
 };
 
 const getGraph = (graphspace, graph, config) => {
@@ -116,8 +125,15 @@ const getDefaultGraph = (graphspace, config) => {
     return config ? request.get(path, config) : request.get(path);
 };
 
-const clearGraphData = (graphspace, graph) => {
+const clearGraph = (graphspace, graph) => {
     return request.post(`/graphspaces/${graphspace}/graphs/${graph}/clear`);
+};
+
+const loadSampleGraph = (graphspace, graph, dataset, config = {}) => {
+    return request.post(`/graphspaces/${graphspace}/graphs/${graph}/sample`, undefined, {
+        ...config,
+        params: {dataset},
+    });
 };
 
 const getGraphStatistic = (graphspace, graph, config) => {
@@ -133,7 +149,7 @@ const cloneGraph = (graphspace, graph, params) => {
 };
 
 export {getGraphList, getGraph, addGraph, updateGraph, delGraph, getDefaultGraph,
-    getGraphView, setDefaultGraph, clearGraphData,
+    getGraphView, setDefaultGraph, clearGraph, loadSampleGraph,
     getGraphStatistic, updateGraphStatistic, cloneGraph};
 
 // meta property
@@ -141,8 +157,9 @@ const getMetaPropertyList = (graphspace, graph, params) => {
     return request.get(`/graphspaces/${graphspace}/graphs/${graph}/schema/propertykeys`, {params});
 };
 
-const addMetaProperty = (graphspace, graph, data) => {
-    return request.post(`/graphspaces/${graphspace}/graphs/${graph}/schema/propertykeys`, data);
+const addMetaProperty = (graphspace, graph, data, config) => {
+    return request.post(
+        `/graphspaces/${graphspace}/graphs/${graph}/schema/propertykeys`, data, config);
 };
 
 const checkMetaProperty = (graphspace, graph, data, config) => {
@@ -341,8 +358,8 @@ const getMetricsTask = () => {
 export {addTask, getTaskList, getTaskDetail, deleteTask, disableTask, enableTask, updateTask, getMetricsTask};
 
 // job
-const getJobsList = params => {
-    return request.get(`${testhost}/jobs/list`, {params});
+const getJobsList = (params, config = {}) => {
+    return request.get(`${testhost}/jobs/list`, {...config, params});
 };
 
 const getJobsDetail = id => {

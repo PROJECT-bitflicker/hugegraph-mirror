@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import {fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import Meta from './index';
 import * as api from '../../api';
 
@@ -25,6 +25,7 @@ jest.mock('react-i18next', () => ({
 }));
 
 jest.mock('react-router-dom', () => ({
+    Link: ({children}) => <span>{children}</span>,
     useNavigate: () => jest.fn(),
     useParams: () => ({graphspace: 'space-a', graph: 'graph-a'}),
 }));
@@ -64,10 +65,78 @@ test('shows persistent source-specific recovery instead of spinning forever', as
     expect(await screen.findByText('schema.identity.graph_unavailable')).toBeInTheDocument();
     expect(screen.getByText('schema.identity.graphspace_unavailable')).toBeInTheDocument();
     expect(screen.queryByText('schema list')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', {name: 'schema.identity.back_to_graph'}))
+        .toHaveAttribute('href', '/graphspace/space-a/graph/graph-a/detail');
 
     fireEvent.click(screen.getByRole('button', {name: 'schema.identity.retry'}));
 
-    await waitFor(() => expect(screen.getByText('Space A - Graph A - schema.title'))
+    await waitFor(() => expect(screen.getByText('schema.title'))
         .toBeInTheDocument());
+    expect(screen.getByText('schema image')).toBeInTheDocument();
+});
+
+test('defaults to image mode and preserves manual list switching', async () => {
+    api.manage.getGraph.mockResolvedValue({
+        status: 200,
+        data: {nickname: 'Graph A'},
+    });
+    api.manage.getGraphSpace.mockResolvedValue({
+        status: 200,
+        data: {nickname: 'Space A'},
+    });
+
+    render(<Meta />);
+
+    expect(await screen.findByText('schema image')).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', {name: 'schema.view_mode'}))
+        .toBeInTheDocument();
+    expect(screen.queryByText('schema list')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('common.label.list_mode'));
+
     expect(screen.getByText('schema list')).toBeInTheDocument();
+    expect(screen.queryByText('schema image')).not.toBeInTheDocument();
+});
+
+test('moves the view switch to the topbar and keeps graph identity out of the body title',
+    async () => {
+        api.manage.getGraph.mockResolvedValue({
+            status: 200,
+            data: {nickname: 'Graph A'},
+        });
+        api.manage.getGraphSpace.mockResolvedValue({
+            status: 200,
+            data: {nickname: 'Space A'},
+        });
+        const topbarHost = document.createElement('div');
+        topbarHost.id = 'hubble-topbar-page-context';
+        document.body.appendChild(topbarHost);
+
+        render(<Meta />);
+
+        expect(await within(topbarHost).findByRole('radiogroup', {
+            name: 'schema.view_mode',
+        })).toBeInTheDocument();
+        expect(screen.getByText('schema.title')).toBeInTheDocument();
+        expect(screen.queryByText('Space A - Graph A - schema.title'))
+            .not.toBeInTheDocument();
+
+        topbarHost.remove();
+    });
+
+test('falls back to path names when aliases are empty or echoed', async () => {
+    api.manage.getGraph.mockResolvedValue({
+        status: 200,
+        data: {name: 'graph-a', nickname: ''},
+    });
+    api.manage.getGraphSpace.mockResolvedValue({
+        status: 200,
+        data: {name: 'space-a', nickname: 'space-a'},
+    });
+
+    render(<Meta />);
+
+    await screen.findByText('schema image');
+    await waitFor(() => expect(screen.getByText('schema.title'))
+        .toBeInTheDocument());
 });

@@ -18,6 +18,8 @@
 
 package org.apache.hugegraph.options;
 
+import java.net.URI;
+
 import static org.apache.hugegraph.config.OptionChecker.allowValues;
 import static org.apache.hugegraph.config.OptionChecker.disallowEmpty;
 import static org.apache.hugegraph.config.OptionChecker.positiveInt;
@@ -117,6 +119,14 @@ public class HubbleOptions extends OptionHolder {
                     "The request timeout in seconds for HugeClient.",
                     positiveInt(),
                     60
+            );
+
+    public static final ConfigOption<Integer> CLIENT_URL_CACHE_MAX_ENTRIES =
+            new ConfigOption<>(
+                    "client.url_cache_max_entries",
+                    "Maximum discovered URL scopes retained for stale fallback.",
+                    positiveInt(),
+                    1024
             );
 
     public static final ConfigOption<Integer> GREMLIN_SUFFIX_LIMIT =
@@ -300,6 +310,129 @@ public class HubbleOptions extends OptionHolder {
                     "The pd-server addresses",
                     null,
                     "127.0.0.1:8620"
+            );
+
+    public static final ConfigOption<Integer> OPERATIONS_CONNECT_TIMEOUT =
+            new ConfigOption<>(
+                    "operations.connect_timeout_ms",
+                    "Connection timeout for each operations upstream.",
+                    positiveInt(),
+                    1500
+            );
+
+    public static final ConfigOption<Integer> OPERATIONS_READ_TIMEOUT =
+            new ConfigOption<>(
+                    "operations.read_timeout_ms",
+                    "Read timeout for each operations upstream.",
+                    positiveInt(),
+                    2500
+            );
+
+    public static final ConfigOption<Integer> OPERATIONS_MAX_RESPONSE_BYTES =
+            new ConfigOption<>(
+                    "operations.max_response_bytes",
+                    "Maximum accepted body size for an operations upstream.",
+                    positiveInt(),
+                    1024 * 1024
+            );
+
+    public static final ConfigOption<Integer> OPERATIONS_CACHE_TTL =
+            new ConfigOption<>(
+                    "operations.cache_ttl_seconds",
+                    "Fresh operations snapshot cache lifetime in seconds.",
+                    positiveInt(),
+                    5
+            );
+
+    public static final ConfigOption<Integer> OPERATIONS_CACHE_MAX_ENTRIES =
+            new ConfigOption<>(
+                    "operations.cache_max_entries",
+                    "Maximum operations snapshots retained across credentials.",
+                    positiveInt(),
+                    1024
+            );
+
+    public static final ConfigOption<Integer> OPERATIONS_STORE_THREADS =
+            new ConfigOption<>(
+                    "operations.store_threads",
+                    "Maximum concurrent Store metric collection tasks.",
+                    positiveInt(),
+                    16
+            );
+
+    public static final ConfigOption<Integer> OPERATIONS_STORE_DEADLINE =
+            new ConfigOption<>(
+                    "operations.store_deadline_ms",
+                    "Total deadline for one Store metric collection pass.",
+                    positiveInt(),
+                    5000
+            );
+
+    public static final ConfigListOption<String> OPERATIONS_STORE_ALLOWED_TARGETS =
+            new ConfigListOption<>(
+                    "operations.store.allowed_targets",
+                    "Operator-managed Store metric origin allowlist.",
+                    input -> !CollectionUtils.isEmpty(input) &&
+                             input.stream().allMatch(
+                                   HubbleOptions::validOperationsStoreTarget),
+                    "http://127.0.0.1:8520", "http://[::1]:8520"
+            );
+
+    private static boolean validOperationsStoreTarget(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return false;
+        }
+        String origin = value.trim();
+        if (origin.contains("*") || origin.matches(".*\\s+.*")) {
+            return false;
+        }
+        try {
+            URI target = URI.create(origin);
+            String scheme = target.getScheme();
+            if (!("http".equalsIgnoreCase(scheme) ||
+                  "https".equalsIgnoreCase(scheme)) ||
+                target.getHost() == null || target.getPort() <= 0 ||
+                target.getPort() > 65535 || target.getUserInfo() != null ||
+                target.getQuery() != null || target.getFragment() != null) {
+                return false;
+            }
+            String path = target.getPath();
+            return path == null || path.isEmpty();
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    public static final ConfigOption<String> OPERATIONS_PD_USERNAME =
+            new ConfigOption<>(
+                    "operations.pd.username",
+                    "PD service identity used only by Hubble Backend.",
+                    disallowEmpty(),
+                    "hubble"
+            );
+
+    public static final ConfigOption<String> OPERATIONS_PD_PASSWORD =
+            new ConfigOption<>(
+                    "operations.pd.password",
+                    "PD service identity secret; never returned by an API.",
+                    null,
+                    ""
+            );
+
+    public static final ConfigOption<String> OPERATIONS_STORE_USERNAME =
+            new ConfigOption<>(
+                    "operations.store.username",
+                    "Store service identity used only by Hubble Backend.",
+                    disallowEmpty(),
+                    "hubble"
+            );
+
+    public static final ConfigOption<String> OPERATIONS_STORE_PASSWORD =
+            new ConfigOption<>(
+                    "operations.store.password",
+                    "Store service identity secret; never returned by an API.",
+                    null,
+                    ""
             );
 
     public static final ConfigOption<String> DASHBOARD_ADDRESS =

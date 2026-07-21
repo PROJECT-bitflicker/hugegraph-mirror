@@ -32,5 +32,7 @@ test('uses localized unknown-route recovery copy', () => {
     );
 
     expect(screen.getByText('not_found.subtitle')).toBeInTheDocument();
-    expect(screen.getByRole('link', {name: 'not_found.home'})).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', {name: 'not_found.home'}))
+        .toHaveAttribute('href', '/navigation');
+    expect(screen.getByTestId('not-found-surface')).toBeInTheDocument();
 });

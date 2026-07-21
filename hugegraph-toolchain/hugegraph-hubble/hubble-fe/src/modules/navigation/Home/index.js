@@ -20,44 +20,126 @@
  * @file 导航首页
  */
 
-import {PageHeader} from 'antd';
+import {Card, Space, Tag} from 'antd';
+import {
+    ApartmentOutlined,
+    ArrowRightOutlined,
+    DatabaseOutlined,
+    HddOutlined,
+    SearchOutlined,
+    ToolOutlined,
+} from '@ant-design/icons';
 import {useTranslation} from 'react-i18next';
-import ManageItem from '../ManageItem';
-import AnalyseItem from '../AnalyseItem';
 import AdminItem from '../AdminItem';
 import ConsoleItem from '../ConsoleItem';
-import * as user from '../../../utils/user';
 import {isPdEnabled} from '../../../utils/config';
-
-import imgLogo from '../../../assets/logo_new.png';
+import {Link} from 'react-router-dom';
+import {useAuthContext} from '../../../auth/AuthContext';
+import {getWorkbenchJourneys} from './workbenchHome';
 
 import style from './index.module.scss';
 
 
 const NavigationHome = () => {
     const {t} = useTranslation();
-    const userInfo = user.getUser();
+    const {context} = useAuthContext();
+    const capabilities = context?.capabilities ?? [];
+    const canManageAccounts = capabilities.includes('accounts_manage')
+        || capabilities.includes('graphspace_members_manage');
+    const canReadOperations = capabilities.includes('operations_health_read');
+    const hasSupport = canManageAccounts || canReadOperations;
     const pdMode = isPdEnabled();
+    const journeys = getWorkbenchJourneys(pdMode);
+    const icons = {
+        understand: <ApartmentOutlined />,
+        prepare: <DatabaseOutlined />,
+        query: <SearchOutlined />,
+    };
 
     return (
-        <>
-            <PageHeader
-                ghost={false}
-                title={t('home.navigation')}
-            />
-
-            <div className={style.navigation}>
-                <div className={style.header}>
-                    <img width={'30%'} src={imgLogo} title={'logoNew'} alt={'logoNew'} />
+        <div className={style.navigation}>
+            <div className={style.header}>
+                <div className={style.headerCopy}>
+                    <h2>{t('home.workbench.title')}</h2>
+                    <p className={style.subtitle}>{t('home.workbench.subtitle')}</p>
+                    <p>{t('home.workbench.intro')}</p>
                 </div>
-                <div className={style.container}>
-                    <ManageItem />
-                    <AnalyseItem />
-                    {pdMode && userInfo.is_superadmin && <AdminItem />}
-                    {pdMode && userInfo.is_superadmin && <ConsoleItem />}
-                </div>
+                <Tag
+                    className={style.modeTag}
+                    color={pdMode ? 'blue' : 'default'}
+                    icon={pdMode ? <ApartmentOutlined /> : <HddOutlined />}
+                >
+                    {t(`home.workbench.mode.${pdMode ? 'pd' : 'non_pd'}`)}
+                </Tag>
             </div>
-        </>
+            <section aria-labelledby="workbench-journeys-title">
+                <h2 id="workbench-journeys-title" className={style.sectionTitle}>
+                    {t('home.workbench.journeys.title')}
+                </h2>
+                <div className={style.journeyGrid}>
+                    {journeys.map((journey, index) => (
+                        <Card
+                            key={journey.key}
+                            className={style.journeyCard}
+                            title={(
+                                <Space>
+                                    <span className={style.step}>{index + 1}</span>
+                                    {icons[journey.key]}
+                                    {t(`home.workbench.journeys.${journey.key}.title`)}
+                                </Space>
+                            )}
+                        >
+                            <p className={style.description}>
+                                {t(`home.workbench.journeys.${journey.key}.description`)}
+                            </p>
+                            <Link
+                                className={style.primaryAction}
+                                to={journey.primaryPath}
+                            >
+                                {t(`home.workbench.journeys.${journey.key}.primary`)}
+                                <ArrowRightOutlined />
+                            </Link>
+                            {journey.secondaryPaths.length > 0 && (
+                                <div className={style.secondaryActions}>
+                                    {journey.secondaryPaths.map((path, actionIndex) => (
+                                        <Link key={path} to={path}>
+                                            {t(
+                                                `home.workbench.journeys.${journey.key}`
+                                                + `.secondary_${actionIndex + 1}`
+                                            )}
+                                        </Link>
+                                    ))}
+                                </div>
+                            )}
+                        </Card>
+                    ))}
+                </div>
+            </section>
+            {hasSupport && (
+                <section
+                    className={style.support}
+                    aria-labelledby="workbench-support-title"
+                >
+                    <Card
+                        className={`${style.journeyCard} ${style.supportCard}`}
+                        title={(
+                            <Space>
+                                <span className={style.step}>4</span>
+                                <ToolOutlined />
+                                <span id="workbench-support-title">
+                                    {t('home.workbench.support')}
+                                </span>
+                            </Space>
+                        )}
+                    >
+                        <div className={style.supportGrid}>
+                            {canManageAccounts && <AdminItem embedded />}
+                            {canReadOperations && <ConsoleItem embedded />}
+                        </div>
+                    </Card>
+                </section>
+            )}
+        </div>
     );
 };
 

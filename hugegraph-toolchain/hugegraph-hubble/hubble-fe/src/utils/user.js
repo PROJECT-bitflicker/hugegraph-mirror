@@ -17,9 +17,15 @@
  */
 
 const key = 'user_'; // 防止缓存问题
+const USER_CHANGE_EVENT = 'hubble:user-change';
+
+const notifyUserChange = () => {
+    window.dispatchEvent(new CustomEvent(USER_CHANGE_EVENT));
+};
 
 const setUser = user => {
     sessionStorage.setItem(key, JSON.stringify(user));
+    notifyUserChange();
 };
 
 const getUser = () => {
@@ -31,8 +37,18 @@ const getUser = () => {
     return {};
 };
 
+const scopedStorageKey = prefix => {
+    const user = getUser();
+    const identity = user?.user_name || user?.id;
+    if (typeof identity !== 'string' || !identity) {
+        return prefix;
+    }
+    return `${prefix}.${encodeURIComponent(identity)}`;
+};
+
 const clearUser = () => {
     sessionStorage.removeItem(key);
+    notifyUserChange();
 };
 
 const clearLogin = () => {
@@ -58,10 +74,12 @@ const getDefaultGraphspace = () => {
     return '';
 };
 
-const isAdmin = () => {
-    const user = getUser();
-
-    return Boolean(user.is_superadmin);
+export {
+    setUser,
+    getUser,
+    scopedStorageKey,
+    clearUser,
+    clearLogin,
+    getDefaultGraphspace,
+    USER_CHANGE_EVENT,
 };
-
-export {setUser, getUser, clearUser, clearLogin, getDefaultGraphspace, isAdmin};

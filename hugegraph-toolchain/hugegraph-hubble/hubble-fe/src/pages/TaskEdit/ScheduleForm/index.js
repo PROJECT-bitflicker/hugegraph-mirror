@@ -16,10 +16,11 @@
  * under the License.
  */
 
-import {Typography, Form, Radio, Input, Space, Button, Select} from 'antd';
+import {Alert, Typography, Form, Radio, Input, Space, Button, Select} from 'antd';
 import {useCallback, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import * as rules from '../../../utils/rules';
+import FormHelpLabel from '../../../components/FormHelpLabel';
 
 const ScheduleForm = ({prev, visible, datasource, loading}) => {
     const {t} = useTranslation();
@@ -34,6 +35,8 @@ const ScheduleForm = ({prev, visible, datasource, loading}) => {
             {label: t('task.edit.schedule_realtime'), value: 'REALTIME', disabled: true},
             {label: t('task.edit.schedule_cron'), value: 'CRON'},
         ];
+    const showLoadType = syncType === 'CRON'
+        && ['KAFKA', 'JDBC'].includes(datasourceType);
 
     const handleSyncTypeChange = useCallback(event => {
         setSyncType(event.target.value);
@@ -51,7 +54,22 @@ const ScheduleForm = ({prev, visible, datasource, loading}) => {
                 }}
             >
                 <Typography.Title level={5}>{t('task.edit.sync_type')}</Typography.Title>
-                <Form.Item label={t('task.edit.sync_type')} required name='task_schedule_type'>
+                <Alert
+                    showIcon
+                    type='info'
+                    message={t('task.edit.schedule_help_title')}
+                    description={t('task.edit.schedule_help')}
+                />
+                <Form.Item
+                    label={(
+                        <FormHelpLabel
+                            label={t('task.edit.sync_type')}
+                            help={t('task.edit.sync_type_help')}
+                        />
+                    )}
+                    required
+                    name='task_schedule_type'
+                >
                     <Radio.Group
                         options={scheduleOptions}
                         onChange={handleSyncTypeChange}
@@ -61,8 +79,13 @@ const ScheduleForm = ({prev, visible, datasource, loading}) => {
                 && (
                     <>
                         <Form.Item
-                            wrapperCol={{offset: 4, span: 14}}
-                            extra={t('task.edit.cron_extra')}
+                            label={(
+                                <FormHelpLabel
+                                    label={t('task.edit.cron_expression')}
+                                    help={t('task.edit.cron_extra')}
+                                />
+                            )}
+                            wrapperCol={{span: 14}}
                             name='task_schedule_extend'
                             rules={[
                                 rules.required(t('task.edit.cron_required')),
@@ -74,8 +97,17 @@ const ScheduleForm = ({prev, visible, datasource, loading}) => {
                     </>
                 )
                 }
-                {(syncType === 'CRON' && ['KAFKA, JDBC'].includes(datasource?.datasource_config?.type)) ? (
-                    <Form.Item label={t('task.edit.sync_type')} name='task_load_type' wrapperCol={{span: 4}}>
+                {showLoadType ? (
+                    <Form.Item
+                        label={(
+                            <FormHelpLabel
+                                label={t('task.edit.load_type')}
+                                help={t('task.edit.load_type_help')}
+                            />
+                        )}
+                        name='task_load_type'
+                        wrapperCol={{span: 4}}
+                    >
                         <Select
                             options={[
                                 {label: t('task.edit.load_full'), value: 'FULL'},
@@ -83,8 +115,14 @@ const ScheduleForm = ({prev, visible, datasource, loading}) => {
                             ]}
                         />
                     </Form.Item>
-                ) : <Form.Item name='task_load_type' hidden />}
-                <Form.Item name='task_schedule_status' hidden />
+                ) : (
+                    <Form.Item name='task_load_type' hidden>
+                        <Input type='hidden' />
+                    </Form.Item>
+                )}
+                <Form.Item name='task_schedule_status' hidden>
+                    <Input type='hidden' />
+                </Form.Item>
 
                 <Form.Item wrapperCol={{offset: 4}}>
                     <Space>

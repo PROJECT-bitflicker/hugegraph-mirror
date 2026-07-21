@@ -22,7 +22,8 @@
 
 import React, {useState, useCallback} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Form, Input, Tooltip} from 'antd';
+import {Input, Tooltip} from 'antd';
+import Form from '../PersistentForm';
 import {RightOutlined, DownOutlined, QuestionCircleOutlined} from '@ant-design/icons';
 import {propertiesValidator} from '../utils';
 import classnames from 'classnames';
@@ -88,14 +89,14 @@ const VerticesItems = props => {
                     ]}
                     tooltip={t('analysis.algorithm.form.vertices_ids_tooltip')}
                 >
-                    <Input />
+                    <Input placeholder={t('analysis.algorithm.form.vertices_ids_placeholder')} />
                 </Form.Item>
                 <Form.Item
                     label="label"
                     name={[name, 'label']}
                     tooltip={t('analysis.algorithm.form.vertices_label_tooltip')}
                 >
-                    <Input />
+                    <Input placeholder={t('analysis.algorithm.form.vertices_label_placeholder')} />
                 </Form.Item>
                 <Form.Item
                     label="properties"
@@ -103,7 +104,9 @@ const VerticesItems = props => {
                     tooltip={t('analysis.algorithm.form.vertices_properties_tooltip')}
                     rules={[{validator: propertiesValidator}]}
                 >
-                    <Input.TextArea />
+                    <Input.TextArea
+                        placeholder={t('analysis.algorithm.form.vertices_properties_placeholder')}
+                    />
                 </Form.Item>
             </div>
         </div>

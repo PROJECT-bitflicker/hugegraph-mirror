@@ -25,6 +25,7 @@ import {useTranslation} from 'react-i18next';
 import {Button, Tooltip} from 'antd';
 import {SyncOutlined} from '@ant-design/icons';
 import {GraphContext} from '../Context';
+import {disableChangeDataRelayout} from '../Graph/data';
 
 const RefreshGraph = () => {
     const {t} = useTranslation();
@@ -35,7 +36,12 @@ const RefreshGraph = () => {
             const {layout} = graph.cfg;
             if (layout) {
                 graph.destroyLayout();
-                graph.updateLayout(layout, 'center', undefined, false);
+                graph.updateLayout(
+                    disableChangeDataRelayout(layout),
+                    'center',
+                    undefined,
+                    false
+                );
             }
         },
         [graph]
@@ -43,7 +49,12 @@ const RefreshGraph = () => {
 
     return (
         <Tooltip title={t('analysis.canvas.toolbar.refresh_layout')} placement='bottom'>
-            <Button type="text" onClick={handleRefreshGraph} icon={<SyncOutlined />} />
+            <Button
+                type="text"
+                aria-label={t('analysis.canvas.toolbar.refresh_layout')}
+                onClick={handleRefreshGraph}
+                icon={<SyncOutlined />}
+            />
         </Tooltip>
     );
 };

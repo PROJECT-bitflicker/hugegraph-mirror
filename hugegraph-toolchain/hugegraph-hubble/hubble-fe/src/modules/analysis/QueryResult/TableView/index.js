@@ -22,13 +22,17 @@
 
 import React, {useCallback, useMemo} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Table} from 'antd';
+import {Alert, Table} from 'antd';
 import GraphStatusView from '../../../component/GraphStatusView';
 import TaskNavigateView from '../../../component/TaskNavigateView';
 import {GRAPH_STATUS} from '../../../../utils/constants';
 import _ from 'lodash';
 import c from './index.module.scss';
-import {isJsonBigNumber, projectJsonValue} from '../Home/utils';
+import {
+    getQueryResultStandbyMessage,
+    isJsonBigNumber,
+    projectJsonValue,
+} from '../Home/utils';
 
 const {
     STANDBY,
@@ -39,6 +43,12 @@ const {
 } = GRAPH_STATUS;
 export function tableRowKey(record, index) {
     return record.id ?? record._id ?? `result-row-${index}`;
+}
+
+export const LARGE_TABLE_RESULT_THRESHOLD = 200;
+
+export function isLargeTableResult(rows) {
+    return Array.isArray(rows) && rows.length >= LARGE_TABLE_RESULT_THRESHOLD;
 }
 
 export function renderTableCell(value) {
@@ -83,7 +93,7 @@ const TableView = props => {
 
     const statusMessage = useMemo(
         () => ({
-            [STANDBY]: t('analysis.query_result.no_data'),
+            [STANDBY]: getQueryResultStandbyMessage(t, isQueryMode),
             [LOADING]: isQueryMode
                 ? t('analysis.query_result.loading')
                 : t('analysis.query_result.submitting_task'),
@@ -103,11 +113,26 @@ const TableView = props => {
                 }
                 return (
                     <div className={c.tableWrapper}>
+                        {isLargeTableResult(queryResultTable?.rows) && (
+                            <Alert
+                                className={c.largeResultNotice}
+                                showIcon
+                                type="info"
+                                message={t('analysis.query_result.large_table_title', {
+                                    count: queryResultTable.rows.length,
+                                })}
+                                description={t('analysis.query_result.large_table_description')}
+                            />
+                        )}
                         <Table
                             rowKey={tableRowKey}
                             dataSource={queryResultTable?.rows || []}
                             columns={tableColums}
                             pagination={{position: ['bottomCenter']}}
+                            scroll={{
+                                x: 'max-content',
+                                y: 'calc(var(--analysis-result-height, 100vh) - 120px)',
+                            }}
                         />
                     </div>
                 );

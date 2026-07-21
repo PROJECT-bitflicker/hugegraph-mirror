@@ -24,6 +24,8 @@ import i18n from '../i18n';
 import * as user from '../utils/user';
 import {withLanguageHeader} from './languageHeader';
 import {showThrottleWarning} from './throttleWarning';
+import {AUTH_REVALIDATE_EVENT} from '../utils/authEvents';
+import {sanitizePublicError} from '../utils/publicError';
 
 const isJsonResponse = headers => {
     const contentType = headers?.['content-type'] || headers?.['Content-Type'] || '';
@@ -40,7 +42,8 @@ const parseResponse = (data, headers) => {
 const redirectToLogin = () => {
     user.clearLogin();
     if (window.location.pathname !== '/login') {
-        const redirect = `${window.location.pathname}${window.location.search}`;
+        const redirect = `${window.location.pathname}${window.location.search}`
+                         + window.location.hash;
         sessionStorage.setItem('redirect', redirect);
         window.location.href = `/login?redirect=${encodeURIComponent(redirect)}`;
     }
@@ -53,10 +56,36 @@ const showRequestError = res => {
     }));
 };
 
+const sanitizeResponseError = response => {
+    const data = response?.data;
+    if (!data || typeof data !== 'object') {
+        return;
+    }
+    if (typeof data.message === 'string') {
+        data.message = sanitizePublicError(data.message);
+    }
+    if (typeof data.path === 'string') {
+        data.path = sanitizePublicError(data.path);
+    }
+};
+
 const isUnauthorizedError = error => {
     return error.response?.status === 401
            || error.response?.data?.status === 401
            || error.message?.includes('status code 401');
+};
+
+const isLoginRequest = config => config?.url?.endsWith('/auth/login');
+
+const showLoginAuthError = response => {
+    const errorMessage = response?.data?.message;
+    message.error(!_.isEmpty(errorMessage) ? errorMessage : i18n.t('request.failed'));
+};
+
+const notifyForbidden = config => {
+    if (!config?.url?.includes('/auth/context')) {
+        window.dispatchEvent(new CustomEvent(AUTH_REVALIDATE_EVENT));
+    }
 };
 
 const instance = axios.create({
@@ -88,12 +117,25 @@ instance.interceptors.request.use(
 
 instance.interceptors.response.use(
     response => {
+        sanitizeResponseError(response);
         if (response.status === 401 || response.data?.status === 401) {
-            redirectToLogin();
+            if (isLoginRequest(response.config)) {
+                showLoginAuthError(response);
+            }
+            else {
+                redirectToLogin();
+            }
             return Promise.reject(response);
         }
         else if (response.data?.status === 429) {
             showThrottleWarning(response.data.message);
+        }
+        else if (response.status === 403 || response.data?.status === 403) {
+            if (isLoginRequest(response.config)) {
+                showLoginAuthError(response);
+                return Promise.reject(response);
+            }
+            notifyForbidden(response.config);
         }
         else if (response.data?.status !== 200
                  && !response.config?.suppressBusinessErrorToast) {
@@ -104,18 +146,40 @@ instance.interceptors.response.use(
         return response;
     },
     error => {
+        sanitizeResponseError(error.response);
+        if (typeof error.message === 'string') {
+            error.message = sanitizePublicError(error.message);
+        }
         if (isUnauthorizedError(error)) {
-            redirectToLogin();
+            if (isLoginRequest(error.config)) {
+                showLoginAuthError(error.response);
+            }
+            else {
+                redirectToLogin();
+            }
             return Promise.reject(error);
         }
         if (error.response?.status === 429
             || error.response?.data?.status === 429) {
             showThrottleWarning(error.response?.data?.message);
+            return error.response;
+        }
+        if (error.response?.status === 403
+            || error.response?.data?.status === 403) {
+            if (isLoginRequest(error.config)) {
+                showLoginAuthError(error.response);
+                return Promise.reject(error);
+            }
+            notifyForbidden(error.config);
             return Promise.reject(error);
         }
         if (!error.config?.suppressBusinessErrorToast) {
             const res = error.response?.data;
             showRequestError(res);
+        }
+        if (error.response) {
+            // Keep legacy form callers settled while the server returns real HTTP errors.
+            return error.response;
         }
         return Promise.reject(error);
     }

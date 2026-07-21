@@ -36,10 +36,13 @@ import org.apache.hugegraph.exception.ServerException;
 import com.google.common.collect.ImmutableMap;
 import org.apache.hugegraph.driver.factory.PDHugeClientFactory;
 import org.apache.hugegraph.options.HubbleOptions;
+import org.apache.hugegraph.service.auth.AuthContextService;
 import org.apache.hugegraph.service.auth.UserService;
 import org.apache.hugegraph.service.auth.LoginAttemptGuard;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -67,6 +70,8 @@ public class LoginController extends BaseController {
     private HugeConfig config;
     @Autowired
     private LoginAttemptGuard loginAttemptGuard;
+    @Autowired
+    private AuthContextService authContextService;
 
     @PostMapping("/login")
     public Object login(@RequestBody Login login) {
@@ -85,10 +90,8 @@ public class LoginController extends BaseController {
                              this.createLoginTokenClient(result.token())) {
                     client.assignGraph(PDHugeClientFactory.DEFAULT_GRAPHSPACE,
                                        null);
-                    UserEntity entity = this.userService.getUser(client,
-                                                                 login.name());
-                    entity.setSuperadmin(
-                            this.userService.isSuperAdmin(client));
+                    UserEntity entity = this.userService.getpersonal(
+                            client, login.name());
                     user = entity;
                 }
             }
@@ -96,7 +99,6 @@ public class LoginController extends BaseController {
             this.getRequest().getSession();
             this.getRequest().changeSessionId();
             this.setUser(login.name());
-            this.setCredentialPassword(login.password());
             this.setToken(result.token());
             return user;
         } catch (Throwable e) {
@@ -226,9 +228,20 @@ public class LoginController extends BaseController {
 
         HugeClient client = authClient(null, null);
 
-        String level = userService.userLevel(client);
+        String level = userService.userLevel(client, this.getUser());
 
         return ImmutableMap.of("level", level);
+    }
+
+    @GetMapping("/context")
+    public ResponseEntity<Object> context() {
+        HugeClient client = this.authClient(null, null);
+        Object context = this.authContextService.context(client,
+                                                         this.getUser());
+        HttpHeaders headers = new HttpHeaders();
+        headers.setCacheControl("no-store");
+        headers.setPragma("no-cache");
+        return new ResponseEntity<>(context, headers, HttpStatus.OK);
     }
 
     // FIXME: Change logout to POST and add CSRF/Origin protection after coordinating

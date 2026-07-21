@@ -20,20 +20,25 @@ import request from './request';
 import qs from 'qs';
 
 // 图分析通用
-const getGraphSpaceList = () => {
-    return request.get('/graphspaces/list');
+const getGraphSpaceList = config => {
+    return config
+        ? request.get('/graphspaces/list', config)
+        : request.get('/graphspaces/list');
 };
 
-const getGraphList = graphSpace => {
-    return request.get(`/graphspaces/${graphSpace}/graphs/list`);
+const getGraphList = (graphSpace, config) => {
+    const url = `/graphspaces/${graphSpace}/graphs/list`;
+    return config ? request.get(url, config) : request.get(url);
 };
 
-const getOlapMode = (graphSpace, graph) => {
-    return request.get(`/graphspaces/${graphSpace}/graphs/${graph}/graph_read_mode`);
+const getOlapMode = (graphSpace, graph, config) => {
+    const url = `/graphspaces/${graphSpace}/graphs/${graph}/graph_read_mode`;
+    return config ? request.get(url, config) : request.get(url);
 };
 
-const switchOlapMode = (graphSpace, graph, params) => {
-    return request.put(`/graphspaces/${graphSpace}/graphs/${graph}/graph_read_mode`, params);
+const switchOlapMode = (graphSpace, graph, params, config) => {
+    const url = `/graphspaces/${graphSpace}/graphs/${graph}/graph_read_mode`;
+    return config ? request.put(url, params, config) : request.put(url, params);
 };
 
 const getUploadList = (graphspace, graph) => {
@@ -92,11 +97,19 @@ const getCypherExecutionQuery = (graphspace, graph, params) => {
 };
 
 const getExecutionTask = (graphspace, graph, params) => {
-    return request.post(`/graphspaces/${graphspace}/graphs/${graph}/gremlin-query/async-task`, params);
+    return request.post(
+        `/graphspaces/${graphspace}/graphs/${graph}/gremlin-query/async-task`,
+        params,
+        {suppressBusinessErrorToast: true}
+    );
 };
 
 const getCypherTask = (graphspace, graph, params) => {
-    return request.post(`/graphspaces/${graphspace}/graphs/${graph}/cypher/async-task`, params);
+    return request.post(
+        `/graphspaces/${graphspace}/graphs/${graph}/cypher/async-task`,
+        params,
+        {suppressBusinessErrorToast: true}
+    );
 };
 
 const fetchManageTaskList = (graphspace, graph, params) => {
@@ -193,8 +206,10 @@ const getExecuteAsyncTaskList = (graphspace, graph, params) => {
     return request.get(`/graphspaces/${graphspace}/graphs/${graph}/execute-histories`, {params});
 };
 
-const loadVermeerTask = params => {
-    return request.post('/vermeer/task', {...params});
+const loadVermeerTask = (params, config) => {
+    return config
+        ? request.post('/vermeer/task', {...params}, config)
+        : request.post('/vermeer/task', {...params});
 };
 
 export {

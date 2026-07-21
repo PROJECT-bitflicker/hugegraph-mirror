@@ -17,11 +17,11 @@
  */
 
 /**
- * @file 图分析模块Header，用于初始化、选择图空间和图，以及OLAP开关
+ * @file 图分析模块Header，用于初始化当前图上下文和展示分析操作
  */
 
-import React, {useCallback, useEffect, useState, useContext} from 'react';
-import {Select, Switch, Button, Tag, message, Typography, Tooltip} from 'antd';
+import React, {useCallback, useEffect, useRef, useState, useContext} from 'react';
+import {Alert, Switch, Button, Tag, message, Tooltip} from 'antd';
 import {SyncOutlined, QuestionCircleOutlined} from '@ant-design/icons';
 import GraphAnalysisContext from '../../Context';
 import * as api from '../../../api';
@@ -32,14 +32,13 @@ import {useTranslation} from 'react-i18next';
 import _ from 'lodash';
 import c from './index.module.scss';
 
-const {Text} = Typography;
-
 const {
     LOADED,
     LOADING,
     CREATED,
     ERROR,
 } = GRAPH_LOAD_STATUS;
+const INLINE_ERROR_CONFIG = {suppressBusinessErrorToast: true};
 
 const TopBar = props => {
     const {
@@ -63,11 +62,15 @@ const TopBar = props => {
     const {isVermeer} = useContext(GraphAnalysisContext);
     const [graphSpaceList, setGraphSpaceList] = useState([]);
     const [currentGraphSpace, setCurrentGraphSpace] = useState();
-    const [isGraphSpaceLoading, setGraphSpaceLoading] = useState(false);
-    const [graphList, setGraphList] = useState([]);
+    const [, setGraphSpaceLoading] = useState(false);
+    const [graphSpaceError, setGraphSpaceError] = useState(false);
     const [currentGraph, setCurrentGraph] = useState({});
-    const [isGraphLoading, setGraphLoading] = useState(false);
+    const [, setGraphLoading] = useState(false);
+    const [graphError, setGraphError] = useState(false);
     const [isLoadRequestLoading, setLoadRequestLoading] = useState(false);
+    const graphSpaceRequest = useRef(null);
+    const graphRequest = useRef(null);
+    const loadRequest = useRef(null);
 
     const {
         status: currentGraphStatus,
@@ -98,65 +101,85 @@ const TopBar = props => {
         }
     };
 
-    const getGraphSpaceOptions = () => {
-        return graphSpaceList?.map(item => ({
-            value: item,
-            label: item,
-        }));
-    };
-
-    const getGraphOptions = () => {
-        return graphList?.map(item => {
-            const {name, status} = item || {};
-            const statusTag = renderStatusTag(status);
-            return {
-                value: name,
-                label: (
-                    <div className={c.graphOptions}>
-                        <Text className={c.graphName} ellipsis={{tooltip: name}}>{name}</Text>
-                        <span className={c.graphStatus}>{statusTag}</span>
-                    </div>),
-            };
-        });
-    };
-
     const getGraphSpaces = useCallback(
         async () => {
+            const request = Symbol('graphspaces');
+            graphSpaceRequest.current = request;
             setGraphSpaceLoading(true);
-            const response = await api.analysis.getGraphSpaceList();
-            const {status, data} = response || {};
-            if (status === 200) {
+            setGraphSpaceError(false);
+            try {
+                const response = await api.analysis.getGraphSpaceList(INLINE_ERROR_CONFIG);
+                if (graphSpaceRequest.current !== request) {
+                    return;
+                }
+                const {status, data} = response || {};
+                if (status !== 200 || !Array.isArray(data?.graphspaces)) {
+                    throw new Error('graphspaces unavailable');
+                }
                 const {graphspaces} = data;
                 setGraphSpaceList(graphspaces);
-                if (!_.isEmpty(graphspaces)) {
-                    // 如果有路由参数则为路由参数，否则为列表第一项；
-                    setCurrentGraphSpace(graphSpaceFromParam || graphspaces[0]);
+                const routeGraphSpace = graphspaces.includes(graphSpaceFromParam)
+                    ? graphSpaceFromParam
+                    : undefined;
+                setCurrentGraphSpace(routeGraphSpace || graphspaces[0]);
+            }
+            catch {
+                if (graphSpaceRequest.current === request) {
+                    setGraphSpaceError(true);
                 }
             }
-            setGraphSpaceLoading(false);
+            finally {
+                if (graphSpaceRequest.current === request) {
+                    setGraphSpaceLoading(false);
+                }
+            }
         },
         [graphSpaceFromParam]
     );
 
     const getGraphs = useCallback(
         async () => {
+            const request = Symbol('graphs');
+            graphRequest.current = request;
             setGraphLoading(true);
-            const response = await api.analysis.getGraphList(currentGraphSpace);
-            const {status, data} = response || {};
-            if (status === 200) {
+            setGraphError(false);
+            try {
+                const response = await api.analysis.getGraphList(
+                    currentGraphSpace, INLINE_ERROR_CONFIG
+                );
+                if (graphRequest.current !== request) {
+                    return;
+                }
+                const {status, data} = response || {};
+                if (status !== 200 || !Array.isArray(data?.graphs)) {
+                    throw new Error('graphs unavailable');
+                }
                 const {graphs = []} = data;
-                setGraphList(graphs);
-                if (!_.isEmpty(graphs)) {
-                    // 如果有路由参数且列表中可以找到(存在有路由参数但是切换空间)，则设置为路由参数，否则为列表第一项；
-                    const graph = _.find(graphs, {name: graphFromParam}) || graphs[0];
-                    setCurrentGraph(graph);
+                const graph = _.find(graphs, {name: graphFromParam}) || graphs[0] || {};
+                setCurrentGraph(current => (
+                    _.isEmpty(graph) && _.isEmpty(current) ? current : graph
+                ));
+            }
+            catch {
+                if (graphRequest.current === request) {
+                    setGraphError(true);
+                    setCurrentGraph(current => (_.isEmpty(current) ? current : {}));
                 }
             }
-            setGraphLoading(false);
-            setLoadRequestLoading(false);
+            finally {
+                if (graphRequest.current === request) {
+                    setGraphLoading(false);
+                }
+            }
         },
         [currentGraphSpace, graphFromParam]
     );
+
+    useEffect(() => () => {
+        graphSpaceRequest.current = null;
+        graphRequest.current = null;
+        loadRequest.current = null;
+    }, []);
 
     useEffect(
         () => {
@@ -183,9 +206,29 @@ const TopBar = props => {
         [currentGraph, currentGraphSpace, onGraphInfoChange]
     );
 
+    useEffect(() => {
+        if (!graphFromParam
+            || !currentGraph?.name
+            || graphSpaceFromParam !== currentGraphSpace
+            || graphFromParam === currentGraph.name) {
+            return;
+        }
+        graphRequest.current = null;
+        setCurrentGraph({});
+        setGraphError(false);
+    }, [
+        currentGraph?.name,
+        currentGraphSpace,
+        graphFromParam,
+        graphSpaceFromParam,
+    ]);
+
     useEffect(
         () => {
             if (taskId || !moduleName || !currentGraphSpace || !currentGraph?.name) {
+                return;
+            }
+            if (graphSpaceFromParam && graphFromParam) {
                 return;
             }
             if (graphSpaceFromParam === currentGraphSpace && graphFromParam === currentGraph.name) {
@@ -206,19 +249,26 @@ const TopBar = props => {
 
     const handleGraphSpaceChange = useCallback(
         value => {
+            graphRequest.current = null;
             setCurrentGraphSpace(value);
             setCurrentGraph({});
+            setGraphError(false);
         },
         []
     );
 
-    const handleGraphChange = useCallback(
-        value => {
-            const currentGraphInfo = _.find(graphList, {name: value});
-            setCurrentGraph(currentGraphInfo);
-        },
-        [graphList]
-    );
+    useEffect(() => {
+        if (graphSpaceFromParam
+            && graphSpaceList.includes(graphSpaceFromParam)
+            && graphSpaceFromParam !== currentGraphSpace) {
+            handleGraphSpaceChange(graphSpaceFromParam);
+        }
+    }, [
+        currentGraphSpace,
+        graphSpaceFromParam,
+        graphSpaceList,
+        handleGraphSpaceChange,
+    ]);
 
     const handleSwitchOlapMode = useCallback(
         checked => {
@@ -232,23 +282,47 @@ const TopBar = props => {
     }, [navigate]);
 
     const onLoadBtnClick = useCallback(async () => {
+        if (isLoadRequestLoading) {
+            return;
+        }
         const params = {
             graphspace: currentGraphSpace,
             graph: currentGraph.name,
             task_type: currentGraphStatus === LOADED ? 'reload' : 'load',
         };
 
+        const request = Symbol('load-vermeer');
+        loadRequest.current = request;
         setLoadRequestLoading(true);
-        const res = await api.analysis.loadVermeerTask(params);
-        const {status, message: errMsg} = res || {};
-        if (status !== 200) {
-            !errMsg && message.error(t('analysis.topbar.load_vermeer_failed'));
-            setLoadRequestLoading(false);
+        try {
+            const res = await api.analysis.loadVermeerTask(params, INLINE_ERROR_CONFIG);
+            if (loadRequest.current !== request) {
+                return;
+            }
+            if (res?.status !== 200) {
+                message.error(t('analysis.topbar.load_vermeer_failed'));
+                return;
+            }
+            await getGraphs();
         }
-        else {
-            getGraphs();
+        catch {
+            if (loadRequest.current === request) {
+                message.error(t('analysis.topbar.load_vermeer_failed'));
+            }
         }
-    }, [currentGraph.name, currentGraphSpace, currentGraphStatus, getGraphs, t]);
+        finally {
+            if (loadRequest.current === request) {
+                setLoadRequestLoading(false);
+            }
+        }
+    }, [
+        currentGraph.name,
+        currentGraphSpace,
+        currentGraphStatus,
+        getGraphs,
+        isLoadRequestLoading,
+        t,
+    ]);
 
     const handleClickNavigate = useCallback(
         () => {
@@ -259,27 +333,6 @@ const TopBar = props => {
 
     return (
         <div className={c.pageHeader}>
-            <span>{t('analysis.topbar.current_graph_space')}</span>
-            <Select
-                value={currentGraphSpace}
-                onChange={handleGraphSpaceChange}
-                options={getGraphSpaceOptions()}
-                style={{width: 120}}
-                bordered={false}
-                loading={isGraphSpaceLoading}
-            />
-            <span>{t('analysis.topbar.current_graph')}</span>
-            <Select
-                popupClassName={c.currentGraphSelect}
-                value={currentGraph.name}
-                onChange={handleGraphChange}
-                options={getGraphOptions()}
-                style={{width: 120}}
-                bordered={false}
-                loading={isGraphLoading}
-                placeholder={t('analysis.topbar.select')}
-                optionLabelProp="value"
-            />
             {
                 showVermeerGraphInfo && (
                     <span className={c.vermeerInfo}>
@@ -293,7 +346,12 @@ const TopBar = props => {
                                     <span>{renderLoadTime()}</span>
                                 </span>)
                         }
-                        <Button size='small' onClick={onLoadBtnClick} disabled={currentGraphStatus === LOADING}>
+                        <Button
+                            size='small'
+                            onClick={onLoadBtnClick}
+                            loading={isLoadRequestLoading}
+                            disabled={currentGraphStatus === LOADING || isLoadRequestLoading}
+                        >
                             {currentGraphStatus === LOADED
                                 ? t('analysis.topbar.reload_to_vermeer')
                                 : t('analysis.topbar.load_to_vermeer')}
@@ -331,10 +389,37 @@ const TopBar = props => {
                             unCheckedChildren={t('common.verify.no')}
                             onChange={handleSwitchOlapMode}
                             loading={isOlapModeLoading}
+                            disabled={!currentGraphSpace || _.isEmpty(currentGraph) || graphError}
                         />
                     </div>
                 )
             }
+            {graphSpaceError && (
+                <Alert
+                    className={c.contextError}
+                    type='error'
+                    showIcon
+                    message={t('analysis.topbar.graph_spaces_failed')}
+                    action={(
+                        <Button size='small' onClick={getGraphSpaces}>
+                            {t('analysis.topbar.retry_graph_spaces')}
+                        </Button>
+                    )}
+                />
+            )}
+            {graphError && (
+                <Alert
+                    className={c.contextError}
+                    type='error'
+                    showIcon
+                    message={t('analysis.topbar.graphs_failed')}
+                    action={(
+                        <Button size='small' onClick={getGraphs}>
+                            {t('analysis.topbar.retry_graphs')}
+                        </Button>
+                    )}
+                />
+            )}
         </div>
 
     );
