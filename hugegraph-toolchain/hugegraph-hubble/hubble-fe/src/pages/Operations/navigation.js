@@ -1,4 +1,4 @@
-/*!
+/*
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements. See the NOTICE file distributed with this
@@ -16,55 +16,17 @@
  * under the License.
  */
 
-.row {
-    :global {
-        .ant-col:not(:last-child) {
-            // border: 1px solid;
-            .cardbox {
-                border-right: 1px solid #E1E1E1;
-            }
-        }
-    }
-}
+const DEFAULT_NODE_RETURN_TO = '/operations/nodes';
+const SAFE_RETURN_TO = /^\/operations\/(?:overview|nodes)(?:\?[^#]*)?$/;
 
-.cardbox {
-    text-align: center;
-    border-right: 1px solid #E1E1E1;
+const operationsReturnState = location => ({
+    operationsReturnTo: `${location.pathname}${location.search}`,
+});
 
-    .title {
-        font-size: 14px;
-        font-weight: 500;
-        color: #666;
-    }
+const operationsReturnTo = location => {
+    const target = location.state?.operationsReturnTo;
+    return typeof target === 'string' && SAFE_RETURN_TO.test(target)
+        ? target : DEFAULT_NODE_RETURN_TO;
+};
 
-    .label {
-        font-size: 14px;
-        color: #999;
-        font-weight: 400;
-    }
-
-    .value {
-        font-size: 24px;
-        color: #000;
-        text-align: center;
-        line-height: 24px;
-        font-weight: 600;
-        margin: 20px 0 8px;
-    }
-}
-
-.last {
-    .cardbox {
-        border-right: 0;
-    }
-    
-}
-
-.technical_details {
-    margin-top: 12px;
-}
-
-.raw_json {
-    max-height: 280px;
-    overflow: auto;
-}
+export {DEFAULT_NODE_RETURN_TO, operationsReturnState, operationsReturnTo};
