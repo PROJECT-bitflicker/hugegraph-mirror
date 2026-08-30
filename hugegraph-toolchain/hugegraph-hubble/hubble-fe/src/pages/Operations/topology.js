@@ -24,8 +24,15 @@ const STATUS_PRIORITY = {
 };
 
 const hasStaleMetrics = node => Object.values(node?.metric_statuses ?? {})
-    .some(status => status?.stale || status?.availability === 'UNAVAILABLE'
-        || status?.availability === 'MALFORMED');
+    .some(status => status?.stale === true);
+
+const hasMetricIssues = node => Object.values(node?.metric_statuses ?? {})
+    .some(status => ['UNAVAILABLE', 'MALFORMED'].includes(status?.availability));
+
+const metricIssueReason = node => Object.values(node?.metric_statuses ?? {})
+    .find(status => ['UNAVAILABLE', 'MALFORMED'].includes(
+        status?.availability
+    ))?.reason ?? null;
 
 const storeLeaderCount = node => {
     if (node?.type !== 'STORE') {
@@ -39,13 +46,30 @@ const selectAttentionNodes = (nodes = [], limit = 5) => {
     if (!Array.isArray(nodes)) {
         return [];
     }
-    return nodes.filter(node => node.status !== 'UP' || hasStaleMetrics(node))
+    return nodes.filter(node => node.status !== 'UP' || hasStaleMetrics(node)
+        || hasMetricIssues(node))
         .sort((left, right) => {
             const status = (STATUS_PRIORITY[left.status] ?? 4)
                 - (STATUS_PRIORITY[right.status] ?? 4);
             return status || String(left.id).localeCompare(String(right.id));
         })
         .slice(0, limit);
+};
+
+const selectAttentionSources = (sources = {}) => {
+    if (!sources || typeof sources !== 'object') {
+        return [];
+    }
+    return Object.entries(sources)
+        .filter(([, source]) => {
+            if (!source || source.availability === 'UNSUPPORTED') {
+                return false;
+            }
+            return source.status && source.status !== 'UP'
+                || source.availability && source.availability !== 'AVAILABLE'
+                || source.stale === true;
+        })
+        .map(([name, source]) => ({name, ...source}));
 };
 
 const selectTierNodes = (nodes = [], type, limit = 3) => {
@@ -80,6 +104,57 @@ const formatMetricValue = (value, unit = '', unavailable = 'Unavailable') => {
     }
 
     return `${value}${unit ? ` ${unit}` : ''}`;
+};
+
+const isBigNumber = value => value !== null
+    && typeof value === 'object'
+    && typeof value.constructor?.isBigNumber === 'function'
+    && value.constructor.isBigNumber(value)
+    && typeof value.comparedTo === 'function'
+    && typeof value.dividedBy === 'function'
+    && typeof value.times === 'function'
+    && typeof value.toNumber === 'function';
+
+const formatBytes = value => {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'];
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    const big = isBigNumber(value);
+    let size = big ? value : Number(value);
+    const invalid = big ? size.comparedTo(0) < 0
+        : !Number.isFinite(size) || size < 0;
+    if (invalid) {
+        return null;
+    }
+    let unit = 0;
+    while ((big ? size.comparedTo(1024) >= 0 : size >= 1024)
+           && unit < units.length - 1) {
+        size = big ? size.dividedBy(1024) : size / 1024;
+        unit += 1;
+    }
+    const display = big ? size.toNumber() : size;
+    return `${new Intl.NumberFormat(undefined, {maximumFractionDigits: 1})
+        .format(display)} ${units[unit]}`;
+};
+
+const ratioPercent = (used, total) => {
+    const usedBig = isBigNumber(used);
+    const totalBig = isBigNumber(total);
+    if (!usedBig && (!Number.isFinite(used) || used < 0)
+        || !totalBig && (!Number.isFinite(total) || total <= 0)) {
+        return null;
+    }
+    if (!usedBig && !totalBig) {
+        return Math.round(used / total * 100);
+    }
+    const BigNumber = (usedBig ? used : total).constructor;
+    const safeUsed = usedBig ? used : new BigNumber(String(used));
+    const safeTotal = totalBig ? total : new BigNumber(String(total));
+    if (safeUsed.comparedTo(0) < 0 || safeTotal.comparedTo(0) <= 0) {
+        return null;
+    }
+    return Math.round(safeUsed.dividedBy(safeTotal).times(100).toNumber());
 };
 
 const formatObservedAt = (value, locale, unavailable) => {
@@ -118,7 +193,12 @@ const formatObservedAge = (value, locale, unavailable, now = Date.now()) => {
 export {
     selectTierNodes,
     selectAttentionNodes,
+    selectAttentionSources,
     hasStaleMetrics,
+    hasMetricIssues,
+    metricIssueReason,
+    formatBytes,
+    ratioPercent,
     formatMetricValue,
     formatObservedAge,
     formatObservedAt,

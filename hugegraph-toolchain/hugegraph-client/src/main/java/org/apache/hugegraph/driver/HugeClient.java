@@ -22,8 +22,12 @@ import java.io.Closeable;
 import lombok.Getter;
 
 import org.apache.hugegraph.client.RestClient;
+import org.apache.hugegraph.exception.ServerException;
 import org.apache.hugegraph.rest.ClientException;
 import org.apache.hugegraph.rest.RestClientConfig;
+import org.apache.hugegraph.structure.auth.TokenPayload;
+import org.apache.hugegraph.structure.auth.User;
+import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.VersionUtil;
 import org.apache.hugegraph.version.ClientVersion;
 import org.slf4j.Logger;
@@ -57,6 +61,8 @@ public class HugeClient implements Closeable {
      */
     private volatile boolean apiVersionChecked;
     private final Object apiVersionLock = new Object();
+    private ServerCompatibility.Profile compatibility =
+            ServerCompatibility.Profile.LEGACY;
     private VersionManager version;
     private GraphsManager graphs;
     private SchemaManager schema;
@@ -186,6 +192,7 @@ public class HugeClient implements Closeable {
             this.traverser = new TraverserManager(client, this.graph);
             this.variable = new VariablesManager(client, graphSpace, graph);
             this.job = new JobManager(client, graphSpace, graph);
+            this.computer = new ComputerManager(client, graphSpace, graph);
             this.task = new TaskManager(client, graphSpace, graph);
         } else {
             /*
@@ -199,6 +206,7 @@ public class HugeClient implements Closeable {
             this.traverser = null;
             this.variable = null;
             this.job = null;
+            this.computer = null;
             this.task = null;
         }
     }
@@ -209,8 +217,9 @@ public class HugeClient implements Closeable {
         //       0.81 equals to the {latest_api_version} +10
         VersionUtil.check(apiVersion, "0.38", "0.81", "hugegraph-api in server");
         this.client.apiVersion(apiVersion);
-        boolean supportGs = VersionUtil.gte(this.version.getCoreVersion(), "1.7.0");
-        this.client.setSupportGs(supportGs);
+        this.compatibility = ServerCompatibility.profile(
+                             this.version.getCoreVersion(), apiVersion.get());
+        this.client.setSupportGs(this.compatibility.supportsGraphSpace());
     }
 
     public GraphsManager graphs() {
@@ -255,6 +264,79 @@ public class HugeClient implements Closeable {
 
     public AuthManager auth() {
         return this.auth;
+    }
+
+    public boolean supportsDefaultRole() {
+        return this.compatibility.supportsDefaultRole();
+    }
+
+    public boolean supportsGraphSpace() {
+        return this.compatibility.supportsGraphSpace();
+    }
+
+    public boolean supportsGraphCreate() {
+        return ServerCompatibility.supportsGraphCreate(
+               this.version.getApiVersion());
+    }
+
+    public boolean supportsCypher() {
+        return this.compatibility.supportsCypher();
+    }
+
+    public boolean supportsPersonalProfileUpdate() {
+        return this.compatibility.supportsPersonalProfileUpdate();
+    }
+
+    public boolean requiresBasicGremlinAuth() {
+        return this.compatibility.requiresBasicGremlinAuth();
+    }
+
+    public boolean isServerAuthEnabled() {
+        try {
+            this.graphs.listGraph();
+            return false;
+        } catch (ServerException e) {
+            if (e.status() == 401) {
+                return true;
+            }
+            throw e;
+        }
+    }
+
+    public User findUserByName(String name) {
+        if (this.supportsDefaultRole()) {
+            return this.auth.getUserByName(name);
+        }
+        return this.auth.listUsers().stream()
+                        .filter(user -> name.equals(user.name()))
+                        .findFirst()
+                        .orElse(null);
+    }
+
+    public User findCurrentUser(String expectedUsername) {
+        TokenPayload payload = this.auth.verifyToken();
+        E.checkState(payload != null &&
+                     !Strings.isNullOrEmpty(payload.userId()) &&
+                     !Strings.isNullOrEmpty(payload.username()),
+                     "Invalid current-user identity");
+        E.checkState(payload.username().equals(expectedUsername),
+                     "Authenticated user does not match the expected user");
+
+        User user;
+        try {
+            user = this.auth.getUser(payload.userId());
+        } catch (ServerException e) {
+            if (e.status() != 403 ||
+                this.supportsPersonalProfileUpdate()) {
+                throw e;
+            }
+            user = new User();
+            user.setId(payload.userId());
+            user.name(payload.username());
+        }
+        E.checkState(user != null && expectedUsername.equals(user.name()),
+                     "Current-user record does not match the token identity");
+        return user;
     }
 
     public MetricsManager metrics() {

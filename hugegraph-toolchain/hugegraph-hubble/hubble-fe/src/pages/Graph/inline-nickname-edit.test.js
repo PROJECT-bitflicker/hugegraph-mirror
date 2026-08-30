@@ -161,6 +161,26 @@ test('does not expose inline editing outside the server-authorized GraphSpace sc
     })).not.toBeInTheDocument();
 });
 
+test('does not grant graph administration to a read-write GraphSpace scope', async () => {
+    mockAuthContext = {
+        context: {
+            mode: 'PD',
+            role: 'USER',
+            scopes: {
+                all_graphspaces: false,
+                admin_graphspaces: [],
+                write_graphspaces: ['space'],
+            },
+        },
+    };
+    await renderGraph();
+    await openListMode();
+
+    expect(screen.queryByRole('button', {
+        name: 'common.action.edit graph.form.nickname',
+    })).not.toBeInTheDocument();
+});
+
 test('keeps a rejected PUT draft visible with an inline error', async () => {
     api.manage.updateGraph.mockRejectedValue({
         config: {suppressBusinessErrorToast: true},
@@ -179,7 +199,8 @@ test('keeps a rejected PUT draft visible with an inline error', async () => {
     fireEvent.change(input, {target: {value: 'Keep draft'}});
     fireEvent.click(screen.getByRole('button', {name: 'common.action.save'}));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Nickname already exists');
+    expect(await screen.findByText('Nickname already exists'))
+        .toHaveAttribute('role', 'alert');
     expect(screen.getByRole('textbox', {name: 'graph.form.nickname'}))
         .toHaveValue('Keep draft');
     expect(screen.getAllByText('Nickname already exists')).toHaveLength(1);

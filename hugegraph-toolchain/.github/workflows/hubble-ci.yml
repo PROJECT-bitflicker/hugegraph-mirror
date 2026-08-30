@@ -23,8 +23,8 @@ on:
 
 env:
   TRAVIS_DIR: hugegraph-hubble/hubble-dist/assembly/travis
-  HUGEGRAPH_SERVER_COMMIT: 99936be5f41fccd193f120e01206e3cf3c73a050
-  HUGEGRAPH_SERVER_FETCH_REF: refs/heads/master
+  HUGEGRAPH_SERVER_GIT_URL: https://github.com/apache/hugegraph.git
+  HUGEGRAPH_SERVER_BRANCH: master
 
 jobs:
   hubble-ci:
@@ -87,11 +87,22 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('hugegraph-hubble/hubble-fe/yarn.lock') }}
 
+      - name: Resolve HugeGraph Server revision
+        id: server-ref
+        run: |
+          SERVER_COMMIT="$(git ls-remote "$HUGEGRAPH_SERVER_GIT_URL" \
+            "refs/heads/$HUGEGRAPH_SERVER_BRANCH" | cut -f1)"
+          if [[ -z "$SERVER_COMMIT" ]]; then
+            echo "Unable to resolve HugeGraph Server branch" >&2
+            exit 1
+          fi
+          echo "commit=$SERVER_COMMIT" >> "$GITHUB_OUTPUT"
+
       - name: Cache HugeGraph Server
         uses: actions/cache@v6
         with:
-          path: ~/hugegraph-cache-${{ env.HUGEGRAPH_SERVER_COMMIT }}
-          key: ${{ runner.os }}-hugegraph-server-${{ env.HUGEGRAPH_SERVER_COMMIT }}
+          path: ~/hugegraph-cache-${{ steps.server-ref.outputs.commit }}
+          key: ${{ runner.os }}-hugegraph-server-${{ steps.server-ref.outputs.commit }}
 
       - name: Frontend i18n check
         working-directory: hugegraph-hubble/hubble-fe
@@ -101,6 +112,7 @@ jobs:
           yarn install --frozen-lockfile --network-timeout 600000 --prefer-offline --ignore-engines
           yarn lint
           yarn i18n:check
+          yarn test --watchAll=false --runInBand
           node --test ../hubble-dist/assembly/travis/ui_auth.test.js
 
       - name: Install Playwright Chromium
@@ -115,8 +127,8 @@ jobs:
 
       - name: Prepare env and service
         env:
-          COMMIT_ID: ${{ env.HUGEGRAPH_SERVER_COMMIT }}
-          COMMIT_REF: ${{ env.HUGEGRAPH_SERVER_FETCH_REF }}
+          COMMIT_ID: ${{ steps.server-ref.outputs.commit }}
+          COMMIT_REF: ${{ steps.server-ref.outputs.commit }}
           NODE_OPTIONS: --max-old-space-size=4096
         run: |
           echo "=== Environment Info ==="
@@ -197,4 +209,4 @@ jobs:
         uses: ./.github/actions/upload-coverage
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          file: target/site/jacoco/*.xml
+          file: hugegraph-hubble/hubble-be/target/jacoco.xml

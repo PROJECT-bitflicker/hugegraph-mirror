@@ -91,6 +91,14 @@ public final class HugeClientPoolService {
         return getOrCreate(null, null, null, null);
     }
 
+    public HugeClient createUnauthClient(int timeout) {
+        return this.create(null, null, null, null, null, null, timeout);
+    }
+
+    public HugeClient createUnauthClient(String graphSpace, String graph) {
+        return getOrCreate(null, graphSpace, graph, null);
+    }
+
     public HugeClient createTempTokenClient(String token) {
         return getOrCreate(null, null, null, token);
     }
@@ -107,6 +115,16 @@ public final class HugeClientPoolService {
     public HugeClient createAuthClient(String graphSpace,
             String graph, String token) {
         return getOrCreate(null, graphSpace, graph, token);
+    }
+
+    public List<String> discoveredServerURLs() {
+        return new ArrayList<>(this.allAvailableURLs(null, null));
+    }
+
+    public HugeClient createDiscoveredServerClient(String url,
+                                                   String authContext,
+                                                   int timeout) {
+        return this.create(url, null, null, authContext, null, null, timeout);
     }
 
     public HugeClient getOrCreate(String url, String graphSpace, String graph,
@@ -128,6 +146,13 @@ public final class HugeClientPoolService {
 
     private HugeClient create(String url, String graphSpace, String graph,
             String token, String username, String password) {
+        return this.create(url, graphSpace, graph, token, username, password,
+                           null);
+    }
+
+    private HugeClient create(String url, String graphSpace, String graph,
+            String token, String username, String password,
+            Integer timeoutOverride) {
         if (StringUtils.isEmpty(url)) {
             List<String> urls = this.allAvailableURLs(graphSpace, graph);
 
@@ -139,8 +164,9 @@ public final class HugeClientPoolService {
                 if (StringUtils.isEmpty(tmpurl)) {
                     continue;
                 }
-                HugeClient tmpclient = this.create(tmpurl, graphSpace, graph, token,
-                                                   username, password);
+                HugeClient tmpclient = this.create(tmpurl, graphSpace, graph,
+                                                   token, username, password,
+                                                   timeoutOverride);
 
                 if (checkHealth(tmpclient)) {
                     return tmpclient;
@@ -167,7 +193,9 @@ public final class HugeClientPoolService {
         connection.setGraphSpace(graphSpace);
         connection.setGraph(graph);
         if (connection.getTimeout() == null) {
-            int timeout = this.config.get(HubbleOptions.CLIENT_REQUEST_TIMEOUT);
+            int timeout = timeoutOverride != null ?
+                          timeoutOverride :
+                          this.config.get(HubbleOptions.CLIENT_REQUEST_TIMEOUT);
             connection.setTimeout(timeout);
         }
         this.sslService.configSSL(this.config, connection);

@@ -20,9 +20,19 @@ import {render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import My from './index';
 import * as api from '../../api';
+import * as user from '../../utils/user';
+import {
+    clearPersistedAlgorithmFormsForUser,
+} from '../../modules/algorithm/algorithmsForm/algorithmFormPersistence';
+
+let mockAuthContext = null;
 
 jest.mock('react-i18next', () => ({
     useTranslation: () => ({t: key => key}),
+}));
+
+jest.mock('../../auth/AuthContext', () => ({
+    useAuthContext: () => ({context: mockAuthContext}),
 }));
 
 jest.mock('../../api', () => ({
@@ -31,6 +41,15 @@ jest.mock('../../api', () => ({
         status: jest.fn(),
         updatePwd: jest.fn(),
     },
+}));
+
+jest.mock('../../utils/user', () => ({
+    clearLogin: jest.fn(),
+    beginLogoutTransition: jest.fn(),
+}));
+
+jest.mock('../../modules/algorithm/algorithmsForm/algorithmFormPersistence', () => ({
+    clearPersistedAlgorithmFormsForUser: jest.fn(),
 }));
 
 jest.mock('./EditLayer', () => ({refresh}) => (
@@ -43,13 +62,40 @@ jest.mock('../../utils/rules', () => ({
 
 beforeEach(() => {
     jest.clearAllMocks();
+    mockAuthContext = {
+        actions: {
+            account: ['read', 'update', 'change_password'],
+        },
+    };
     window.matchMedia = jest.fn().mockImplementation(query => ({
         matches: false,
         media: query,
         addListener: jest.fn(),
         removeListener: jest.fn(),
     }));
+    sessionStorage.clear();
+    delete window.location;
+    window.location = {replace: jest.fn()};
     api.auth.status.mockResolvedValue({status: 200, data: {level: 'ADMIN'}});
+});
+
+test('keeps legacy profile read and password actions without edit', async () => {
+    mockAuthContext = {
+        actions: {account: ['read', 'change_password']},
+    };
+    api.auth.getPersonal.mockResolvedValue({
+        status: 200,
+        data: {user_name: 'alice'},
+    });
+
+    render(<My />);
+
+    expect(await screen.findByRole('heading', {name: 'alice'}))
+        .toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: 'common.action.edit'}))
+        .not.toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'my.edit.title'}))
+        .toBeInTheDocument();
 });
 
 const deferred = () => {
@@ -202,6 +248,8 @@ test('stops password submit loading when form validation rejects', async () => {
     await waitFor(() => expect(document.querySelector('.ant-form-item-has-error')).not.toBeNull());
     await waitFor(() => expect(confirm).not.toHaveClass('ant-btn-loading'));
     expect(api.auth.updatePwd).not.toHaveBeenCalled();
+    expect(user.clearLogin).not.toHaveBeenCalled();
+    expect(window.location.replace).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText('my.edit.new_password_placeholder')).toBeInTheDocument();
 });
 
@@ -217,6 +265,8 @@ test('stops password submit loading when the request rejects', async () => {
     ));
     await waitFor(() => expect(confirm).not.toHaveClass('ant-btn-loading'));
     expect(screen.getByPlaceholderText('my.edit.new_password_placeholder')).toBeInTheDocument();
+    expect(user.clearLogin).not.toHaveBeenCalled();
+    expect(window.location.replace).not.toHaveBeenCalled();
 });
 
 test('stops password submit loading and preserves the form on a non-200 response', async () => {
@@ -231,11 +281,14 @@ test('stops password submit loading and preserves the form on a non-200 response
     ));
     await waitFor(() => expect(confirm).not.toHaveClass('ant-btn-loading'));
     expect(screen.getByPlaceholderText('my.edit.old_password_placeholder')).toHaveValue('old-pass');
+    expect(user.clearLogin).not.toHaveBeenCalled();
+    expect(window.location.replace).not.toHaveBeenCalled();
 });
 
-test('keeps loading during a password request and closes the form only on success', async () => {
+test('clears local auth and redirects only after the password update succeeds', async () => {
     const request = deferred();
     api.auth.updatePwd.mockReturnValue(request.promise);
+    sessionStorage.setItem('redirect', '/gremlin/DEFAULT/hugegraph');
     const confirm = await openPasswordForm();
     await fillValidPasswords();
 
@@ -248,8 +301,11 @@ test('keeps loading during a password request and closes the form only on succes
 
     request.resolve({status: 200});
 
-    await waitFor(() => expect(
-        screen.queryByPlaceholderText('my.edit.new_password_placeholder')
-    ).not.toBeInTheDocument());
-    expect(screen.getByRole('heading', {name: 'Administrator'})).toBeInTheDocument();
+    await waitFor(() => expect(user.clearLogin).toHaveBeenCalledTimes(1));
+    expect(user.beginLogoutTransition).toHaveBeenCalledTimes(1);
+    expect(clearPersistedAlgorithmFormsForUser).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem('redirect')).toBeNull();
+    expect(sessionStorage.getItem('hubble.login_notice')).toBeNull();
+    expect(window.location.replace)
+        .toHaveBeenCalledWith('/login?notice=credential-updated');
 });

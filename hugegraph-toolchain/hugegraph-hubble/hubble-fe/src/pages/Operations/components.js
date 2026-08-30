@@ -35,6 +35,7 @@ import {
     formatObservedAge,
     formatObservedAt,
     hasStaleMetrics,
+    metricIssueReason,
     selectTierNodes,
     storeLeaderCount,
 } from './topology';
@@ -60,9 +61,31 @@ const NODE_TYPE_LABELS = {
 
 const displayNodeType = type => NODE_TYPE_LABELS[type] ?? type ?? '—';
 
+const displayTopologyNodeName = node => {
+    if (node?.type !== 'SERVER') {
+        return node?.name;
+    }
+    return node.name?.replace(/^HugeGraph Server\b/, 'Server');
+};
+
 const displayHealthStatus = (status, t) => (
     status === 'DEGRADED' ? t('operations.status_degraded') : status
 );
+
+const sourceHealthSummary = (source, t) => {
+    const status = source.status ?? 'UNKNOWN';
+    const availability = source.availability ?? 'UNSUPPORTED';
+    if (availability === 'UNSUPPORTED') {
+        return t('operations.source_health_not_applicable');
+    }
+    if (status === 'UP' && availability === 'AVAILABLE') {
+        return t('operations.source_health_normal');
+    }
+    if (status === 'DOWN' || ['UNAVAILABLE', 'MALFORMED'].includes(availability)) {
+        return t('operations.source_health_unavailable');
+    }
+    return t('operations.source_health_partial');
+};
 
 const HealthStatus = ({status = 'UNKNOWN', reason, stale = false, size = 'normal'}) => {
     const {t} = useTranslation();
@@ -113,46 +136,84 @@ const SourceStrip = ({sources = {}, detailed = false,
         >
             {sourceNames.map(name => {
                 const source = sources[name] ?? {};
-                const age = source.observed_at ? formatObservedAge(
-                    source.observed_at,
+                const lastObservedAt = source.stale
+                    ? source.last_success_at ?? source.observed_at
+                    : source.observed_at ?? source.last_success_at;
+                const age = lastObservedAt ? formatObservedAge(
+                    lastObservedAt,
                     i18n.language,
                     t('operations.unavailable')
                 ) : null;
-                const observed = source.observed_at ? formatObservedAt(
-                    source.observed_at,
+                const observed = lastObservedAt ? formatObservedAt(
+                    lastObservedAt,
                     i18n.language,
                     t('operations.unavailable')
                 ) : null;
-                const showLastSuccess = detailed || source.stale
-                    || source.status !== 'UP' || source.availability !== 'AVAILABLE';
+                const availability = t(`operations.availability_${(
+                    source.availability ?? 'UNSUPPORTED'
+                ).toLowerCase()}`, {
+                    defaultValue: source.availability ?? 'UNSUPPORTED',
+                });
+                const healthSummary = sourceHealthSummary(source, t);
+                const sourceDetails = [
+                    healthSummary,
+                    `${t('operations.source_topology_status')}: ${
+                        displayHealthStatus(source.status ?? 'UNKNOWN', t)
+                    }`,
+                    `${t('operations.source_collection_status')}: ${availability}`,
+                    observed
+                        ? `${t('operations.last_observed')}: ${observed}` : null,
+                    source.stale ? t('operations.stale') : null,
+                    source.reason ? formatReason(source.reason, t) : null,
+                ].filter(Boolean).join(' · ');
+                const sourceLabel = displayNodeType(name === 'stores'
+                    ? 'STORE' : name.toUpperCase());
+                const sourceSummary = `${sourceLabel} ${
+                    displayHealthStatus(source.status ?? 'UNKNOWN', t)
+                } · ${sourceDetails}`;
                 return (
-                    <div className='operations-source' key={name}>
-                        <strong>
-                            {displayNodeType(name === 'stores'
-                                ? 'STORE' : name.toUpperCase())}
-                        </strong>
-                        <HealthStatus
-                            status={source.status}
-                            reason={source.reason}
-                        />
-                        <span className='operations-source-state'>
-                            {t(`operations.availability_${(
-                                source.availability ?? 'UNSUPPORTED'
-                            ).toLowerCase()}`, {defaultValue: source.availability ?? 'UNSUPPORTED'})}
-                            {detailed && observed
-                                ? ` · ${t('operations.observed_at')}: ${observed}`
-                                : (age ? ` · ${age}` : '')}
-                            {source.stale ? ` · ${t('operations.stale')}` : ''}
-                            {source.reason ? ` · ${formatReason(source.reason, t)}` : ''}
-                            {showLastSuccess && source.last_success_at
-                                ? ` · ${t('operations.last_success')}: ${formatObservedAt(
-                                    source.last_success_at,
-                                    i18n.language,
-                                    t('operations.unavailable')
-                                )}`
-                                : ''}
-                        </span>
-                    </div>
+                    <Tooltip key={name} title={detailed ? null : sourceDetails}>
+                        <div
+                            className='operations-source'
+                            tabIndex={detailed ? undefined : 0}
+                            aria-label={detailed ? undefined : sourceSummary}
+                        >
+                            <strong>{sourceLabel}</strong>
+                            <HealthStatus
+                                status={source.status}
+                                reason={detailed ? source.reason : undefined}
+                            />
+                            {!detailed && (
+                                <span className='operations-source-summary'>
+                                    {healthSummary}
+                                    {age ? ` · ${age}` : ''}
+                                    {source.stale
+                                        ? ` · ${t('operations.stale')}` : ''}
+                                </span>
+                            )}
+                            {detailed && (
+                                <span className='operations-source-state'>
+                                    {healthSummary}
+                                    {` · ${t('operations.source_topology_status')}: ${
+                                        displayHealthStatus(
+                                            source.status ?? 'UNKNOWN', t
+                                        )
+                                    }`}
+                                    {` · ${t('operations.source_collection_status')}: ${
+                                        availability
+                                    }`}
+                                    {observed
+                                        ? ` · ${t('operations.last_observed')}: ${
+                                            observed
+                                        }`
+                                        : (age ? ` · ${age}` : '')}
+                                    {source.stale ? ` · ${t('operations.stale')}` : ''}
+                                    {source.reason
+                                        ? ` · ${formatReason(source.reason, t)}` : ''}
+                                </span>
+                            )}
+                        </div>
+                    </Tooltip>
                 );
             })}
         </section>
@@ -194,6 +255,12 @@ const RefreshButton = ({loading = false, onClick}) => {
 
 const nodeRoleLabel = (node, t) => {
     if (node?.role) {
+        if (node.role === 'LEADER') {
+            return t('operations.leader');
+        }
+        if (node.role === 'FOLLOWER') {
+            return t('operations.follower');
+        }
         return node.role;
     }
     const leaders = storeLeaderCount(node);
@@ -205,6 +272,7 @@ const nodeRoleLabel = (node, t) => {
 
 const TierNode = ({node, returnState}) => {
     const {t} = useTranslation();
+    const name = displayTopologyNodeName(node);
     return (
         <Link
             className={[
@@ -215,12 +283,12 @@ const TierNode = ({node, returnState}) => {
             ].filter(Boolean).join(' ')}
             to={`/operations/nodes/${node.id}`}
             state={returnState}
-            aria-label={`${node.type} ${node.name} ${node.role ?? ''} ${
+            aria-label={`${node.type} ${name} ${nodeRoleLabel(node, t)} ${
                 displayHealthStatus(node.status, t)}`}
         >
             <TierIcon type={node.type} />
             <span className='operations-node-copy'>
-                <strong>{node.name}</strong>
+                <strong>{name}</strong>
                 <span>
                     {node.type === 'PD' && node.role === 'LEADER' && (
                         <CrownOutlined
@@ -232,7 +300,11 @@ const TierNode = ({node, returnState}) => {
                         ? (node.version ?? '—') : nodeRoleLabel(node, t)}
                 </span>
             </span>
-            <HealthStatus status={node.status} stale={hasStaleMetrics(node)} />
+            <HealthStatus
+                status={node.status}
+                reason={metricIssueReason(node)}
+                stale={hasStaleMetrics(node)}
+            />
         </Link>
     );
 };

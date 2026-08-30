@@ -26,7 +26,6 @@ import {
     Select,
     Space,
     Table,
-    Tabs,
     Tag,
     Typography,
 } from 'antd';
@@ -35,17 +34,91 @@ import {useTranslation} from 'react-i18next';
 import * as api from '../../api';
 import TableHeader from '../../components/TableHeader';
 import {useAuthContext} from '../../auth/AuthContext';
-
-const PAGE_ERROR_CONFIG = {suppressBusinessErrorToast: true};
-const PAGE_PARAMS = {query: '', page_no: 1, page_size: 200};
-const PERMISSIONS = ['READ', 'WRITE', 'DELETE', 'EXECUTE'];
-const DEFAULT_RESOURCES = JSON.stringify([
-    {type: 'GREMLIN', label: '*', properties: null},
-], null, 2);
+import {PERMISSION_PRESETS} from './permissionPresets';
+import {loadAllPages, PAGE_ERROR_CONFIG} from './pagedRecords';
 
 const responseRecords = response => response?.data?.records ?? [];
-const responseList = response => (Array.isArray(response?.data) ? response.data : []);
-const accessRowKey = row => `${row.role_id}:${row.target_id}`;
+const errorDetail = value => {
+    const response = value?.response ?? value;
+    return response?.data?.message ?? response?.message;
+};
+const isMissingAccount = (value, t) => {
+    const detail = errorDetail(value);
+    if (typeof detail !== 'string') {
+        return false;
+    }
+    const normalized = detail.toLowerCase();
+    const subject = t('account.space_access.member.missing_response_subject')
+        .toLowerCase();
+    const predicate = t('account.space_access.member.missing_response_predicate')
+        .toLowerCase();
+    return normalized.includes('user or group is not exist')
+        || normalized.includes('account does not exist')
+        || (normalized.includes(subject) && normalized.includes(predicate));
+};
+const showMutationError = (error, t) => {
+    const detail = errorDetail(error);
+    if (isMissingAccount(error, t)) {
+        message.error(t('account.space_access.member.account_not_found'));
+        return;
+    }
+    message.error(detail
+        ? `${t('common.msg.operation_failed')} (${detail})`
+        : t('common.msg.operation_failed'));
+};
+const adminRole = {
+    role_id: PERMISSION_PRESETS.GS_ADMIN,
+    permission_preset: PERMISSION_PRESETS.GS_ADMIN,
+};
+
+const mergeMembersAndAdmins = (members, admins) => {
+    const rows = new Map(members.map(member => [
+        member.user_id,
+        {...member, member_roles: member.roles ?? []},
+    ]));
+    admins.forEach(admin => {
+        const userId = admin.id ?? admin.user_id;
+        const existing = rows.get(userId) ?? {};
+        rows.set(userId, {
+            ...existing,
+            user_id: userId,
+            user_name: admin.name ?? admin.user_name ?? existing.user_name,
+            member_roles: existing.roles ?? existing.member_roles ?? [],
+            roles: [...(existing.roles ?? existing.member_roles ?? []), adminRole],
+            is_space_admin: true,
+        });
+    });
+    return Array.from(rows.values());
+};
+
+const rolePreset = role => {
+    const explicit = role?.permission_preset ?? role?.permissionPreset;
+    return Object.values(PERMISSION_PRESETS).includes(explicit)
+        ? explicit
+        : null;
+};
+
+const rolesPreset = roles => {
+    const values = roles ?? [];
+    const presets = values.map(rolePreset);
+    if (presets.some(preset => preset === null)) {
+        return null;
+    }
+    if (values.some(role => (role?.permission_preset ?? role?.permissionPreset) === PERMISSION_PRESETS.GS_ADMIN)) {
+        return PERMISSION_PRESETS.GS_ADMIN;
+    }
+    return values.length > 0 && presets.every(Boolean) && new Set(presets).size === 1 ? presets[0] : null;
+};
+
+const roleLabel = (role, t) => {
+    const preset = rolePreset(role);
+    if (preset) {
+        return t(`account.permission_preset.${preset}`);
+    }
+    const name = role?.role_name ?? role?.name;
+    const legacy = t('account.permission_preset.legacy_custom');
+    return name ? `${name} · ${legacy}` : legacy;
+};
 
 const RowAction = ({row, onAction, children}) => {
     const handleClick = useCallback(() => onAction(row), [onAction, row]);
@@ -116,36 +189,34 @@ const ErrorAlert = ({error, retry, t}) => (error ? (
     />
 ) : null);
 
-const SpaceAccess = () => {
+const SpaceAccess = ({
+    onCreateAccount,
+    onPendingAccountHandled,
+    pendingAccount,
+}) => {
     const {t} = useTranslation();
     const {context} = useAuthContext();
     const contextVersion = context?.context_version;
     const scopes = context?.scopes ?? {};
     const memberActions = context?.actions?.members ?? [];
-    const roleActions = context?.actions?.roles ?? [];
-    const authorizationActions = context?.actions?.authorizations ?? [];
     const canAddMember = memberActions.includes('add');
     const canRemoveMember = memberActions.includes('remove');
-    const canCreateRole = roleActions.includes('create');
-    const canUpdateRole = roleActions.includes('update');
-    const canDeleteRole = roleActions.includes('delete');
-    const canGrant = authorizationActions.includes('grant');
-    const canRevoke = authorizationActions.includes('revoke');
     const [selectedSpace, setSelectedSpace] = useState('');
     const [allSpaces, setAllSpaces] = useState([]);
     const [spacesLoading, setSpacesLoading] = useState(false);
     const [spacesError, setSpacesError] = useState(false);
     const [spacesRevision, setSpacesRevision] = useState(0);
     const spacesRequest = useRef(null);
+    const accountValidation = useRef(null);
     const [memberDialog, setMemberDialog] = useState(null);
-    const [roleDialog, setRoleDialog] = useState(null);
-    const [targetDialog, setTargetDialog] = useState(null);
-    const [accessDialog, setAccessDialog] = useState(null);
+    const [missingAccountId, setMissingAccountId] = useState(null);
     const [submitting, setSubmitting] = useState(false);
     const [memberForm] = Form.useForm();
-    const [roleForm] = Form.useForm();
-    const [targetForm] = Form.useForm();
-    const [accessForm] = Form.useForm();
+    const accountNotFoundMessage = useCallback(() => t(
+        onCreateAccount
+            ? 'account.space_access.member.account_not_found'
+            : 'account.space_access.member.account_not_found_contact_admin'
+    ), [onCreateAccount, t]);
 
     const scopedSpaces = useMemo(
         () => scopes.admin_graphspaces ?? [],
@@ -164,7 +235,7 @@ const SpaceAccess = () => {
         spacesRequest.current = token;
         setSpacesLoading(true);
         setSpacesError(false);
-        api.manage.getGraphSpaceList(PAGE_PARAMS, PAGE_ERROR_CONFIG)
+        loadAllPages(api.manage.getGraphSpaceList, {params: {query: ''}})
             .then(response => {
                 if (spacesRequest.current !== token) {
                     return;
@@ -194,37 +265,33 @@ const SpaceAccess = () => {
 
     const spaces = scopes.all_graphspaces ? allSpaces : scopedSpaces;
     const graphSpace = spaces.includes(selectedSpace) ? selectedSpace : spaces[0];
-    const loadMembers = useCallback(space => api.auth.getSpaceMembers(
-        space, PAGE_PARAMS, PAGE_ERROR_CONFIG
+    const loadMembers = useCallback(space => loadAllPages(
+        (params, config) => api.auth.getSpaceMembers(space, params, config),
+        {params: {query: ''}}
     ), []);
-    const loadRoles = useCallback(space => api.auth.getSpaceRoles(
-        space, PAGE_PARAMS, PAGE_ERROR_CONFIG
-    ), []);
-    const loadTargets = useCallback(space => api.auth.getSpaceTargets(
-        space, PAGE_PARAMS, PAGE_ERROR_CONFIG
-    ), []);
-    const loadAccesses = useCallback(space => api.auth.getSpaceAccesses(
-        space, {}, PAGE_ERROR_CONFIG
+    const loadAdmins = useCallback(space => loadAllPages(
+        (params, config) => api.auth.getSpaceAdmins(space, params, config),
+        {params: {query: ''}}
     ), []);
     const members = useScopedResource(
         graphSpace, contextVersion, loadMembers, responseRecords
     );
-    const roles = useScopedResource(
-        graphSpace, contextVersion, loadRoles, responseRecords
+    const admins = useScopedResource(graphSpace, contextVersion, loadAdmins, responseRecords
     );
-    const targets = useScopedResource(
-        graphSpace, contextVersion, loadTargets, responseRecords
-    );
-    const accesses = useScopedResource(
-        graphSpace, contextVersion, loadAccesses, responseList
-    );
+    const visibleMembers = {
+        data: mergeMembersAndAdmins(members.data, admins.data),
+        loading: members.loading || admins.loading,
+        error: members.error || admins.error,
+        retry: () => {
+            members.retry();
+            admins.retry();
+        },
+    };
 
     const refreshAll = useCallback(() => {
         members.retry();
-        roles.retry();
-        targets.retry();
-        accesses.retry();
-    }, [accesses, members, roles, targets]);
+        admins.retry();
+    }, [admins, members]);
 
     const runMutation = useCallback(async (operation, close) => {
         if (submitting) {
@@ -234,7 +301,7 @@ const SpaceAccess = () => {
         try {
             const response = await operation();
             if (response?.status !== 200) {
-                message.error(t('common.msg.operation_failed'));
+                showMutationError(response, t);
                 return;
             }
             message.success(t('common.msg.success'));
@@ -242,130 +309,165 @@ const SpaceAccess = () => {
             refreshAll();
         }
         catch (error) {
-            message.error(t('common.msg.operation_failed'));
+            showMutationError(error, t);
         }
         finally {
             setSubmitting(false);
         }
     }, [refreshAll, submitting, t]);
 
-    const openMember = useCallback(row => {
+    const openMember = useCallback((row, graphSpaceSelectable = false) => {
+        const memberGraphSpace = graphSpaceSelectable
+            && spaces.includes(row?.graphspace)
+            ? row.graphspace
+            : graphSpace;
+        const requestedSpaces = graphSpaceSelectable
+            && Array.isArray(row?.graphspaces)
+            ? row.graphspaces.filter(space => spaces.includes(space))
+            : [memberGraphSpace].filter(Boolean);
         memberForm.setFieldsValue({
             user_id: row?.user_id,
-            roles: row?.roles?.map(role => role.role_id) ?? [],
+            account_id: row?.user_name,
+            permission_preset: row?.permission_preset
+                ?? rolesPreset(row?.roles),
+            graphspace: graphSpaceSelectable
+                ? requestedSpaces
+                : memberGraphSpace,
         });
-        setMemberDialog(row ?? {});
-    }, [memberForm]);
-    const openRole = useCallback(row => {
-        roleForm.setFieldsValue({
-            role_name: row?.role_name ?? row?.role_nickname,
-            role_description: row?.role_description,
+        setMissingAccountId(null);
+        setMemberDialog({
+            ...(row ?? {}),
+            graphSpaceSelectable,
         });
-        setRoleDialog(row ?? {});
-    }, [roleForm]);
-    const openTarget = useCallback(row => {
-        targetForm.setFieldsValue({
-            target_name: row?.target_name,
-            target_graph: row?.target_graph,
-            target_description: row?.target_description,
-            target_resources: row?.target_resources
-                ? JSON.stringify(row.target_resources, null, 2)
-                : DEFAULT_RESOURCES,
-        });
-        setTargetDialog(row ?? {});
-    }, [targetForm]);
-    const openAccess = useCallback(row => {
-        accessForm.setFieldsValue({
-            role_id: row?.role_id,
-            target_id: row?.target_id,
-            permissions: row?.permissions ?? [],
-        });
-        setAccessDialog(row ?? {});
-    }, [accessForm]);
-
-    const closeMember = useCallback(() => {
-        setMemberDialog(null);
-        memberForm.resetFields();
-    }, [memberForm]);
-    const closeRole = useCallback(() => {
-        setRoleDialog(null);
-        roleForm.resetFields();
-    }, [roleForm]);
-    const closeTarget = useCallback(() => {
-        setTargetDialog(null);
-        targetForm.resetFields();
-    }, [targetForm]);
-    const closeAccess = useCallback(() => {
-        setAccessDialog(null);
-        accessForm.resetFields();
-    }, [accessForm]);
-
-    const submitMember = useCallback(values => {
-        const roleLookup = new Map(roles.data.map(role => [role.id, role]));
-        const payload = {
-            user_id: values.user_id,
-            roles: values.roles.map(id => ({
-                role_id: id,
-                role_name: roleLookup.get(id)?.role_name
-                           ?? roleLookup.get(id)?.role_nickname ?? id,
-            })),
-        };
-        const operation = memberDialog?.user_id
-            ? () => api.auth.updateSpaceMember(
-                graphSpace, memberDialog.user_id, payload, PAGE_ERROR_CONFIG
-            )
-            : () => api.auth.addSpaceMember(
-                graphSpace, payload, PAGE_ERROR_CONFIG
-            );
-        runMutation(operation, closeMember);
-    }, [closeMember, graphSpace, memberDialog, roles.data, runMutation]);
-
-    const submitRole = useCallback(values => {
-        const operation = roleDialog?.id
-            ? () => api.auth.updateSpaceRole(
-                graphSpace, roleDialog.id, values, PAGE_ERROR_CONFIG
-            )
-            : () => api.auth.addSpaceRole(
-                graphSpace, values, PAGE_ERROR_CONFIG
-            );
-        runMutation(operation, closeRole);
-    }, [closeRole, graphSpace, roleDialog, runMutation]);
-
-    const submitTarget = useCallback(values => {
-        let resources;
-        try {
-            resources = JSON.parse(values.target_resources);
-            if (!Array.isArray(resources)) {
-                throw new Error('resources must be an array');
-            }
-        }
-        catch (error) {
-            targetForm.setFields([{
-                name: 'target_resources',
-                errors: [t('account.space_access.target.resources_invalid')],
-            }]);
+    }, [graphSpace, memberForm, spaces]);
+    useEffect(() => {
+        if (!pendingAccount || !graphSpace) {
             return;
         }
-        const payload = {
-            target_name: values.target_name,
-            target_graph: values.target_graph,
-            target_description: values.target_description,
-            target_resources: resources,
-        };
-        const operation = targetDialog?.id
-            ? () => api.auth.updateSpaceTarget(
-                graphSpace, targetDialog.id, payload, PAGE_ERROR_CONFIG
-            )
-            : () => api.auth.addSpaceTarget(
-                graphSpace, payload, PAGE_ERROR_CONFIG
+        openMember(pendingAccount, true);
+        onPendingAccountHandled?.();
+    }, [
+        graphSpace,
+        onPendingAccountHandled,
+        openMember,
+        pendingAccount,
+        spaces,
+    ]);
+    const closeMember = useCallback(() => {
+        accountValidation.current = null;
+        setMemberDialog(null);
+        setMissingAccountId(null);
+        memberForm.resetFields();
+    }, [memberForm]);
+    const validateExistingAccount = useCallback(async (_, value) => {
+        const validation = Symbol('account-validation');
+        accountValidation.current = validation;
+        setMissingAccountId(null);
+        memberForm.setFieldValue('user_id', undefined);
+        if (!value) {
+            return;
+        }
+        const graphSpaceValue = memberForm.getFieldValue('graphspace');
+        const targetSpace = Array.isArray(graphSpaceValue)
+            ? graphSpaceValue[0]
+            : graphSpaceValue;
+        if (!targetSpace) {
+            return;
+        }
+        const isCurrent = () => accountValidation.current === validation
+            && memberForm.getFieldValue('account_id') === value;
+        let response;
+        try {
+            response = await api.auth.getSpaceAccount(
+                targetSpace, value, PAGE_ERROR_CONFIG
             );
-        runMutation(operation, closeTarget);
-    }, [closeTarget, graphSpace, runMutation, t, targetDialog, targetForm]);
-
-    const submitAccess = useCallback(values => {
-        runMutation(() => api.auth.saveSpaceAccess(graphSpace, values,
-            PAGE_ERROR_CONFIG), closeAccess);
-    }, [closeAccess, graphSpace, runMutation]);
+        }
+        catch (error) {
+            if (!isCurrent()) {
+                return;
+            }
+            if (isMissingAccount(error, t)) {
+                setMissingAccountId(value);
+                throw new Error(accountNotFoundMessage());
+            }
+            throw new Error(
+                t('account.space_access.member.account_check_failed')
+            );
+        }
+        if (!isCurrent()) {
+            return;
+        }
+        const account = response?.data;
+        if (response?.status !== 200) {
+            if (isMissingAccount(response, t)) {
+                setMissingAccountId(value);
+                throw new Error(accountNotFoundMessage());
+            }
+            throw new Error(
+                t('account.space_access.member.account_check_failed')
+            );
+        }
+        if (!(account?.user_id ?? account?.id)) {
+            setMissingAccountId(value);
+            throw new Error(accountNotFoundMessage());
+        }
+        memberForm.setFieldValue('user_id', account.user_id ?? account.id);
+    }, [accountNotFoundMessage, memberForm, t]);
+    const handleAccountIdChange = useCallback(() => {
+        accountValidation.current = null;
+        setMissingAccountId(null);
+        memberForm.setFieldValue('user_id', undefined);
+    }, [memberForm]);
+    const startAccountCreation = useCallback(() => {
+        if (!missingAccountId || !onCreateAccount) {
+            return;
+        }
+        const graphSpaceValue = memberForm.getFieldValue('graphspace');
+        const graphspaces = Array.isArray(graphSpaceValue)
+            ? graphSpaceValue
+            : [graphSpaceValue].filter(Boolean);
+        const request = {
+            graphspaces,
+            permission_preset: memberForm.getFieldValue('permission_preset'),
+            user_name: missingAccountId,
+        };
+        closeMember();
+        onCreateAccount(request);
+    }, [closeMember, memberForm, missingAccountId, onCreateAccount]);
+    const submitMember = useCallback(values => {
+        const graphSpaces = Array.isArray(values.graphspace)
+            ? values.graphspace
+            : [values.graphspace];
+        runMutation(
+            async () => {
+                const results = await Promise.allSettled(
+                    graphSpaces.map(space => api.auth.setSpacePreset(
+                        space,
+                        values.user_id ?? values.account_id,
+                        values.account_id,
+                        values.permission_preset,
+                        PAGE_ERROR_CONFIG
+                    ))
+                );
+                const failedSpaces = graphSpaces.filter((_, index) => {
+                    const result = results[index];
+                    return result.status === 'rejected'
+                           || result.value?.status !== 200;
+                });
+                if (failedSpaces.length > 0) {
+                    refreshAll();
+                    const options = {
+                        success: graphSpaces.length - failedSpaces.length,
+                        total: graphSpaces.length,
+                        spaces: failedSpaces.join(', '),
+                    };
+                    throw new Error(t('account.space_access.member.batch_failed', options));
+                }
+                return {status: 200};
+            },
+            closeMember
+        );
+    }, [closeMember, refreshAll, runMutation, t]);
 
     const confirmDelete = useCallback((title, operation) => {
         Modal.confirm({
@@ -381,136 +483,39 @@ const SpaceAccess = () => {
             graphSpace, row.user_id, PAGE_ERROR_CONFIG
         )
     ), [confirmDelete, graphSpace, t]);
-    const editRole = useCallback(row => openRole(row), [openRole]);
-    const deleteRole = useCallback(row => confirmDelete(
-        t('account.space_access.role.delete_confirm'),
-        () => api.auth.deleteSpaceRole(graphSpace, row.id, PAGE_ERROR_CONFIG)
-    ), [confirmDelete, graphSpace, t]);
-    const editTarget = useCallback(row => openTarget(row), [openTarget]);
-    const deleteTarget = useCallback(row => confirmDelete(
-        t('account.space_access.target.delete_confirm'),
-        () => api.auth.deleteSpaceTarget(graphSpace, row.id, PAGE_ERROR_CONFIG)
-    ), [confirmDelete, graphSpace, t]);
-    const editAccess = useCallback(row => openAccess(row), [openAccess]);
-    const deleteAccess = useCallback(row => confirmDelete(
-        t('account.space_access.authorization.delete_confirm'),
-        () => api.auth.deleteSpaceAccess(
-            graphSpace, row.role_id, row.target_id, PAGE_ERROR_CONFIG
-        )
-    ), [confirmDelete, graphSpace, t]);
     const addMember = useCallback(() => openMember(), [openMember]);
-    const addRole = useCallback(() => openRole(), [openRole]);
-    const addTarget = useCallback(() => openTarget(), [openTarget]);
-    const addAccess = useCallback(() => openAccess(), [openAccess]);
+    const canManageMember = row => scopes.all_graphspaces
+        || !row.is_space_admin;
     const retrySpaces = useCallback(
         () => setSpacesRevision(value => value + 1), []
     );
     const submitMemberForm = useCallback(() => memberForm.submit(), [memberForm]);
-    const submitRoleForm = useCallback(() => roleForm.submit(), [roleForm]);
-    const submitTargetForm = useCallback(() => targetForm.submit(), [targetForm]);
-    const submitAccessForm = useCallback(() => accessForm.submit(), [accessForm]);
+    const replacingCustomAccess = Boolean(
+        memberDialog?.user_id
+        && (memberDialog.roles ?? []).length > 0
+        && rolesPreset(memberDialog.roles) === null
+    );
 
     const memberColumns = [
-        {title: t('account.space_access.member.id'), dataIndex: 'user_id'},
-        {title: t('account.space_access.member.name'), dataIndex: 'user_name'},
+        {title: t('account.space_access.member.id'), dataIndex: 'user_name'},
         {
             title: t('account.space_access.member.roles'),
             dataIndex: 'roles',
             render: value => value?.map(role => (
-                <Tag key={role.role_id}>{role.role_name}</Tag>
+                <Tag key={role.role_id}>{roleLabel(role, t)}</Tag>
             )),
         },
         ...((canAddMember || canRemoveMember) ? [{
             title: t('common.operation'),
             render: row => (
                 <Space>
-                    {canAddMember && (
+                    {canAddMember && canManageMember(row) && (
                         <RowAction row={row} onAction={editMember}>
                             {t('common.action.edit')}
                         </RowAction>
                     )}
-                    {canRemoveMember && (
+                    {canRemoveMember && canManageMember(row) && (
                         <RowAction row={row} onAction={deleteMember}>
-                            {t('common.action.delete')}
-                        </RowAction>
-                    )}
-                </Space>
-            ),
-        }] : []),
-    ];
-
-    const roleColumns = [
-        {title: t('account.space_access.role.name'), dataIndex: 'role_name'},
-        {
-            title: t('account.space_access.role.description'),
-            dataIndex: 'role_description',
-        },
-        ...((canUpdateRole || canDeleteRole) ? [{
-            title: t('common.operation'),
-            render: row => (
-                <Space>
-                    {canUpdateRole && (
-                        <RowAction row={row} onAction={editRole}>
-                            {t('common.action.edit')}
-                        </RowAction>
-                    )}
-                    {canDeleteRole && (
-                        <RowAction row={row} onAction={deleteRole}>
-                            {t('common.action.delete')}
-                        </RowAction>
-                    )}
-                </Space>
-            ),
-        }] : []),
-    ];
-
-    const targetColumns = [
-        {title: t('account.space_access.target.name'), dataIndex: 'target_name'},
-        {title: t('account.space_access.target.graph'), dataIndex: 'target_graph'},
-        {
-            title: t('account.space_access.target.description'),
-            dataIndex: 'target_description',
-        },
-        ...((canGrant || canRevoke) ? [{
-            title: t('common.operation'),
-            render: row => (
-                <Space>
-                    {canGrant && (
-                        <RowAction row={row} onAction={editTarget}>
-                            {t('common.action.edit')}
-                        </RowAction>
-                    )}
-                    {canRevoke && (
-                        <RowAction row={row} onAction={deleteTarget}>
-                            {t('common.action.delete')}
-                        </RowAction>
-                    )}
-                </Space>
-            ),
-        }] : []),
-    ];
-
-    const accessColumns = [
-        {title: t('account.space_access.role.name'), dataIndex: 'role_name'},
-        {title: t('account.space_access.target.name'), dataIndex: 'target_name'},
-        {
-            title: t('account.space_access.authorization.permissions'),
-            dataIndex: 'permissions',
-            render: value => value?.map(permission => (
-                <Tag key={permission}>{permission}</Tag>
-            )),
-        },
-        ...((canGrant || canRevoke) ? [{
-            title: t('common.operation'),
-            render: row => (
-                <Space>
-                    {canGrant && (
-                        <RowAction row={row} onAction={editAccess}>
-                            {t('common.action.edit')}
-                        </RowAction>
-                    )}
-                    {canRevoke && (
-                        <RowAction row={row} onAction={deleteAccess}>
                             {t('common.action.delete')}
                         </RowAction>
                     )}
@@ -559,6 +564,9 @@ const SpaceAccess = () => {
 
     return (
         <>
+            <Typography.Paragraph type="secondary">
+                {t('account.space_access.description')}
+            </Typography.Paragraph>
             <Space align="center" wrap>
                 <Typography.Text strong>
                     {t('account.space_access.graphspace')}
@@ -572,47 +580,11 @@ const SpaceAccess = () => {
                     style={{minWidth: 240}}
                 />
             </Space>
-            <Tabs
-                items={[
-                    {
-                        key: 'members',
-                        label: t('account.space_access.tabs.members'),
-                        children: table(
-                            members, memberColumns, 'user_id',
-                            t('account.space_access.member.add'),
-                            addMember, canAddMember
-                        ),
-                    },
-                    {
-                        key: 'roles',
-                        label: t('account.space_access.tabs.roles'),
-                        children: table(
-                            roles, roleColumns, 'id',
-                            t('account.space_access.role.add'),
-                            addRole, canCreateRole
-                        ),
-                    },
-                    {
-                        key: 'targets',
-                        label: t('account.space_access.tabs.targets'),
-                        children: table(
-                            targets, targetColumns, 'id',
-                            t('account.space_access.target.add'),
-                            addTarget, canGrant
-                        ),
-                    },
-                    {
-                        key: 'authorizations',
-                        label: t('account.space_access.tabs.authorizations'),
-                        children: table(
-                            accesses, accessColumns,
-                            accessRowKey,
-                            t('account.space_access.authorization.add'),
-                            addAccess, canGrant
-                        ),
-                    },
-                ]}
-            />
+            {table(
+                visibleMembers, memberColumns, 'user_id',
+                t('account.space_access.member.add'),
+                addMember, canAddMember
+            )}
 
             <Modal
                 open={memberDialog !== null}
@@ -620,148 +592,106 @@ const SpaceAccess = () => {
                 onCancel={closeMember}
                 onOk={submitMemberForm}
                 confirmLoading={submitting}
+                okText={replacingCustomAccess
+                    ? t('account.space_access.member.replace')
+                    : t('common.action.save')}
                 destroyOnClose
             >
+                {replacingCustomAccess && (
+                    <Alert
+                        type="warning"
+                        showIcon
+                        message={t('account.space_access.member.custom_title')}
+                        description={t(
+                            'account.space_access.member.custom_description'
+                        )}
+                    />
+                )}
                 <Form form={memberForm} layout="vertical" onFinish={submitMember}>
                     <Form.Item
-                        name="user_id"
-                        label={t('account.space_access.member.id')}
+                        name="graphspace"
+                        label={t('account.space_access.graphspace')}
                         rules={[{required: true}]}
                     >
-                        <Input disabled={Boolean(memberDialog?.user_id)} />
+                        <Select
+                            aria-label={t('account.space_access.graphspace')}
+                            disabled={!memberDialog?.graphSpaceSelectable}
+                            mode={memberDialog?.graphSpaceSelectable
+                                ? 'multiple'
+                                : undefined}
+                            options={spaces.map(space => ({
+                                label: space,
+                                value: space,
+                            }))}
+                        />
                     </Form.Item>
+                    {memberDialog?.user_id ? (
+                        <>
+                            <Form.Item
+                                name="account_id"
+                                label={t('account.space_access.member.id')}
+                                rules={[{required: true}]}
+                            >
+                                <Input disabled />
+                            </Form.Item>
+                            <Form.Item name="user_id" hidden>
+                                <Input onChange={handleAccountIdChange} />
+                            </Form.Item>
+                        </>
+                    ) : (
+                        <>
+                            <Form.Item
+                                name="account_id"
+                                label={t(
+                                    'account.space_access.member.existing_account'
+                                )}
+                                dependencies={['graphspace']}
+                                extra={missingAccountId && onCreateAccount ? (
+                                    <Button
+                                        type="link"
+                                        size="small"
+                                        onClick={startAccountCreation}
+                                    >
+                                        {t(
+                                            'account.space_access.member.create_account'
+                                        )}
+                                    </Button>
+                                ) : null}
+                                validateTrigger="onBlur"
+                                rules={[
+                                    {required: true},
+                                    {validator: validateExistingAccount},
+                                ]}
+                            >
+                                <Input />
+                            </Form.Item>
+                            <Form.Item name="user_id" hidden>
+                                <Input />
+                            </Form.Item>
+                        </>
+                    )}
                     <Form.Item
-                        name="roles"
+                        name="permission_preset"
                         label={t('account.space_access.member.roles')}
-                        rules={[{required: true, type: 'array', min: 1}]}
+                        rules={[{required: true}]}
                     >
                         <Select
-                            mode="multiple"
-                            options={roles.data.map(role => ({
-                                value: role.id,
-                                label: role.role_name ?? role.role_nickname,
-                            }))}
+                            options={Object.values(PERMISSION_PRESETS)
+                                .filter(value => value !== PERMISSION_PRESETS.SUPER_ADMIN)
+                                .filter(value => scopes.all_graphspaces
+                                                 || value !== PERMISSION_PRESETS.GS_ADMIN)
+                                .map(value => ({
+                                    value,
+                                    label: t(`account.permission_preset.${value}`),
+                                }))}
                         />
                     </Form.Item>
                 </Form>
             </Modal>
 
-            <Modal
-                open={roleDialog !== null}
-                title={t('account.space_access.role.dialog')}
-                onCancel={closeRole}
-                onOk={submitRoleForm}
-                confirmLoading={submitting}
-                destroyOnClose
-            >
-                <Form form={roleForm} layout="vertical" onFinish={submitRole}>
-                    <Form.Item
-                        name="role_name"
-                        label={t('account.space_access.role.name')}
-                        rules={[{required: true}]}
-                    >
-                        <Input />
-                    </Form.Item>
-                    <Form.Item
-                        name="role_description"
-                        label={t('account.space_access.role.description')}
-                    >
-                        <Input />
-                    </Form.Item>
-                </Form>
-            </Modal>
-
-            <Modal
-                open={targetDialog !== null}
-                title={t('account.space_access.target.dialog')}
-                onCancel={closeTarget}
-                onOk={submitTargetForm}
-                confirmLoading={submitting}
-                destroyOnClose
-            >
-                <Form form={targetForm} layout="vertical" onFinish={submitTarget}>
-                    <Form.Item
-                        name="target_name"
-                        label={t('account.space_access.target.name')}
-                        rules={[{required: true}]}
-                    >
-                        <Input disabled={Boolean(targetDialog?.id)} />
-                    </Form.Item>
-                    <Form.Item
-                        name="target_graph"
-                        label={t('account.space_access.target.graph')}
-                        rules={[{required: true}]}
-                    >
-                        <Input disabled={Boolean(targetDialog?.id)} />
-                    </Form.Item>
-                    <Form.Item
-                        name="target_description"
-                        label={t('account.space_access.target.description')}
-                    >
-                        <Input />
-                    </Form.Item>
-                    <Form.Item
-                        name="target_resources"
-                        label={t('account.space_access.target.resources')}
-                        rules={[{required: true}]}
-                    >
-                        <Input.TextArea autoSize={{minRows: 5, maxRows: 12}} />
-                    </Form.Item>
-                </Form>
-            </Modal>
-
-            <Modal
-                open={accessDialog !== null}
-                title={t('account.space_access.authorization.dialog')}
-                onCancel={closeAccess}
-                onOk={submitAccessForm}
-                confirmLoading={submitting}
-                destroyOnClose
-            >
-                <Form form={accessForm} layout="vertical" onFinish={submitAccess}>
-                    <Form.Item
-                        name="role_id"
-                        label={t('account.space_access.role.name')}
-                        rules={[{required: true}]}
-                    >
-                        <Select
-                            disabled={Boolean(accessDialog?.role_id)}
-                            options={roles.data.map(role => ({
-                                value: role.id,
-                                label: role.role_name ?? role.role_nickname,
-                            }))}
-                        />
-                    </Form.Item>
-                    <Form.Item
-                        name="target_id"
-                        label={t('account.space_access.target.name')}
-                        rules={[{required: true}]}
-                    >
-                        <Select
-                            disabled={Boolean(accessDialog?.target_id)}
-                            options={targets.data.map(target => ({
-                                value: target.id,
-                                label: target.target_name,
-                            }))}
-                        />
-                    </Form.Item>
-                    <Form.Item
-                        name="permissions"
-                        label={t('account.space_access.authorization.permissions')}
-                        rules={[{required: true, type: 'array', min: 1}]}
-                    >
-                        <Select
-                            mode="multiple"
-                            options={PERMISSIONS.map(permission => ({
-                                value: permission,
-                                label: permission,
-                            }))}
-                        />
-                    </Form.Item>
-                </Form>
-            </Modal>
         </>
     );
 };
 
+export {loadAllPages, rolesPreset};
 export default SpaceAccess;

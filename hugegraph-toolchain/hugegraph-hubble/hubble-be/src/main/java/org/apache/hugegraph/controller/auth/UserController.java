@@ -72,10 +72,10 @@ public class UserController extends BaseController {
     }
 
     @PostMapping
-    public void create(@RequestBody UserEntity userEntity) {
+    public UserEntity create(@RequestBody UserEntity userEntity) {
         HugeClient client = this.requireAccountManager();
         this.checkAccountGrantScope(client, null, userEntity);
-        userService.add(client, userEntity);
+        return userService.add(client, userEntity);
     }
 
     @PostMapping("batch")
@@ -115,6 +115,11 @@ public class UserController extends BaseController {
         }
         this.checkAccountGrantScope(client, current.getName(), userEntity);
         userService.update(client, userEntity);
+        if (Objects.equals(this.getUser(), current.getName()) &&
+            userEntity.getPassword() != null &&
+            !userEntity.getPassword().isEmpty()) {
+            this.clearAuthSession();
+        }
     }
 
     @DeleteMapping("{id}")
@@ -131,7 +136,13 @@ public class UserController extends BaseController {
                     "Permission denied: change another account password");
         }
         HugeClient client = this.authClient(null, null);
-        return userService.updatepwd(client, pwd.getUsername(), pwd.getOldpwd(), pwd.getNewpwd());
+        Response response = userService.updatepwd(client, pwd.getUsername(),
+                                                  pwd.getOldpwd(),
+                                                  pwd.getNewpwd());
+        if (response.getStatus() == Constant.STATUS_OK) {
+            this.clearAuthSession();
+        }
+        return response;
     }
 
     @GetMapping("listadminspace/{username}")

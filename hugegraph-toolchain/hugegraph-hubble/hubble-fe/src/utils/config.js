@@ -31,4 +31,23 @@ const isPdEnabled = () => {
     return getConfig().pd_enabled;
 };
 
-export {setConfig, getConfig, isPdEnabled};
+const isAuthEnabled = () => {
+    return getConfig().auth_enabled !== false;
+};
+
+const isGraphCreateEnabled = () => {
+    return getConfig().graph_create_enabled === true;
+};
+
+const isCypherEnabled = () => {
+    return getConfig().cypher_enabled === true;
+};
+
+export {
+    setConfig,
+    getConfig,
+    isPdEnabled,
+    isAuthEnabled,
+    isGraphCreateEnabled,
+    isCypherEnabled,
+};

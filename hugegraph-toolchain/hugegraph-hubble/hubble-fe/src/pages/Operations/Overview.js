@@ -41,11 +41,15 @@ import {
     SourceStrip,
 } from './components';
 import {
+    formatBytes,
     formatMetricValue,
     formatObservedAge,
     formatObservedAt,
     hasStaleMetrics,
+    metricIssueReason,
+    ratioPercent,
     selectAttentionNodes,
+    selectAttentionSources,
 } from './topology';
 import {TopbarPageContextSlot} from '../../components/Topbar/PageContextSlot';
 import {operationsReturnState} from './navigation';
@@ -185,14 +189,19 @@ const Overview = () => {
     );
     const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
     const attentionNodes = selectAttentionNodes(nodes);
+    const attentionSources = selectAttentionSources(data?.sources);
+    const clusterReason = data?.reason?.startsWith('cluster_')
+        ? data.reason : null;
+    const showAttention = nodes.length > 0
+        || attentionSources.length > 0
+        || clusterReason;
     const facts = data?.facts ?? {};
     const pdLeader = facts.pd_leader ?? nodes.find(node => (
         node.type === 'PD' && node.role === 'LEADER'
     ))?.name;
-    const capacityPercent = Number.isFinite(facts.capacity_used)
-        && Number.isFinite(facts.capacity_total) && facts.capacity_total > 0
-        ? Math.round(facts.capacity_used / facts.capacity_total * 100)
-        : null;
+    const capacityPercent = ratioPercent(
+        facts.capacity_used_bytes, facts.capacity_total_bytes
+    );
     const dashboardStatusReason = dashboard.status === 'checking'
         ? t('navigation_page.dashboard_checking')
         : dashboard.status === 'unconfigured'
@@ -223,7 +232,11 @@ const Overview = () => {
             title: t('operations.status'),
             dataIndex: 'status',
             render: (status, node) => (
-                <HealthStatus status={status} stale={hasStaleMetrics(node)} />
+                <HealthStatus
+                    status={status}
+                    reason={metricIssueReason(node)}
+                    stale={hasStaleMetrics(node)}
+                />
             ),
         },
     ];
@@ -240,7 +253,11 @@ const Overview = () => {
             title: t('operations.status'),
             dataIndex: 'status',
             render: (status, node) => (
-                <HealthStatus status={status} stale={hasStaleMetrics(node)} />
+                <HealthStatus
+                    status={status}
+                    reason={metricIssueReason(node)}
+                    stale={hasStaleMetrics(node)}
+                />
             ),
         },
         {
@@ -294,8 +311,7 @@ const Overview = () => {
             key: 'data_size',
             icon: HddOutlined,
             label: t('operations.fact_data_size'),
-            value: facts.data_size === null || facts.data_size === undefined
-                ? null : `${facts.data_size} ${facts.data_size_unit ?? ''}`.trim(),
+            value: formatBytes(facts.data_size_bytes),
         },
     ];
 
@@ -377,14 +393,11 @@ const Overview = () => {
                         <div className='operations-overview-grid'>
                             <section className='operations-topology-surface'>
                                 <div className='operations-section-heading'>
-                                    <div>
-                                        <h3>
-                                            {view === 'topology'
-                                                ? t('operations.topology')
-                                                : t('operations.node_list_view')}
-                                        </h3>
-                                        <span>{t('operations.logical_relationship')}</span>
-                                    </div>
+                                    <h3>
+                                        {view === 'topology'
+                                            ? t('operations.topology')
+                                            : t('operations.node_list_view')}
+                                    </h3>
                                 </div>
                                 {nodes.length === 0
                                     ? <Empty description={t('operations.empty_cluster')} />
@@ -440,8 +453,8 @@ const Overview = () => {
                                         <span>{t('operations.fact_capacity')}</span>
                                         <strong>
                                             {capacityPercent === null ? unavailable : (
-                                                `${facts.capacity_used} / ${facts.capacity_total} `
-                                                + `${facts.capacity_unit ?? ''} `
+                                                `${formatBytes(facts.capacity_used_bytes)} / `
+                                                + `${formatBytes(facts.capacity_total_bytes)} `
                                                 + `(${capacityPercent}%)`
                                             )}
                                         </strong>
@@ -465,17 +478,67 @@ const Overview = () => {
                         </div>
                         <SourceStrip sources={data?.sources} />
                     </section>
-                    {nodes.length > 0 && (
+                    {showAttention && (
                         <section
                             className='operations-surface operations-attention'
-                            aria-label={t('operations.attention_nodes')}
+                            aria-label={t('operations.attention_items')}
                         >
                             <div className='operations-attention-heading'>
-                                <h3>{t('operations.attention_nodes')}</h3>
+                                <h3>{t('operations.attention_items')}</h3>
                                 <Link to='/operations/nodes'>
                                     {t('operations.view_all_nodes')} <RightOutlined />
                                 </Link>
                             </div>
+                            {clusterReason && (
+                                <Alert
+                                    className='operations-source-attention'
+                                    type='warning'
+                                    showIcon
+                                    message={t('operations.cluster_attention')}
+                                    description={t(
+                                        `operations.reason_${clusterReason}`,
+                                        {
+                                            defaultValue: clusterReason
+                                                .replaceAll('_', ' '),
+                                        }
+                                    )}
+                                    action={(
+                                        <Link to='/operations/nodes'>
+                                            {t('operations.view_all_nodes')}
+                                        </Link>
+                                    )}
+                                />
+                            )}
+                            {attentionSources.map(source => {
+                                const type = source.name === 'stores'
+                                    ? 'STORE' : source.name.toUpperCase();
+                                return (
+                                    <Alert
+                                        className='operations-source-attention'
+                                        key={source.name}
+                                        type='warning'
+                                        showIcon
+                                        message={t('operations.source_attention', {
+                                            source: displayNodeType(type),
+                                        })}
+                                        description={t(
+                                            `operations.reason_${source.reason}`,
+                                            {
+                                                defaultValue: source.reason
+                                                    ? source.reason.replaceAll('_', ' ')
+                                                    : t('operations.status_degraded_help'),
+                                            }
+                                        )}
+                                        action={(
+                                            <Link to={`/operations/nodes?type=${type}`}>
+                                                {t('operations.view_source_nodes', {
+                                                    source: displayNodeType(type),
+                                                })}
+                                            </Link>
+                                        )}
+                                    />
+                                );
+                            })}
                             {attentionNodes.length > 0 ? (
                                 <Table
                                     rowKey='id'
@@ -484,7 +547,13 @@ const Overview = () => {
                                     pagination={false}
                                     size='small'
                                 />
-                            ) : <p>{t('operations.all_nodes_healthy')}</p>}
+                            ) : (
+                                <p className='operations-nodes-healthy'>
+                                    {(attentionSources.length > 0 || clusterReason)
+                                        ? t('operations.nodes_healthy_source_attention')
+                                        : t('operations.all_nodes_healthy')}
+                                </p>
+                            )}
                         </section>
                     )}
                 </>

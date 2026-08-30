@@ -16,18 +16,30 @@
  * under the License.
  */
 
-import {Modal, Input, Form, Select, message, Spin, Switch} from 'antd';
+import {Alert, Modal, Input, Form, message, Spin, Switch} from 'antd';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import * as api from '../../api';
 import * as rules from '../../utils/rules';
 import style from './index.module.scss';
 import FormHelpLabel from '../../components/FormHelpLabel';
-import {getAccountLevel} from './level';
+import {accountErrorMessage} from './accountError';
+import {useAuthContext} from '../../auth/AuthContext';
+import {
+    getAccountPresetLabelKey,
+    getPresetSpaces,
+    PERMISSION_PRESETS,
+    toPermissionPayload,
+} from './permissionPresets';
+import {PAGE_ERROR_CONFIG} from './pagedRecords';
 
-const PAGE_ERROR_CONFIG = {suppressBusinessErrorToast: true};
-const DEFAULT_ALLOWED_OPERATIONS = {create: true, edit: true, auth: true};
-
+const DEFAULT_ALLOWED_OPERATIONS = {create: true, edit: true};
+const toProfilePayload = values => ({
+    user_name: values.user_name,
+    user_nickname: values.user_nickname,
+    user_password: values.user_password,
+    user_description: values.user_description,
+});
 const HelpLabel = ({t, labelKey}) => (
     <FormHelpLabel
         label={t(labelKey)}
@@ -41,62 +53,86 @@ const EditLayer = ({
     data,
     op,
     refresh,
+    onCreated,
     allowedOperations = DEFAULT_ALLOWED_OPERATIONS,
 }) => {
     const {t} = useTranslation();
+    const {context} = useAuthContext();
     const [form] = Form.useForm();
-    const [graphspaceList, setGraphspaceList] = useState([]);
     const [detail, setDetail] = useState({});
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [mutationError, setMutationError] = useState(null);
     const submitPending = useRef(false);
     const detailRequest = useRef(0);
+    const permissionPresetsSupported = !context
+        || context.capabilities?.includes('account_permission_presets');
+    const standalone = context?.mode === 'NON_PD';
 
     const title = {
         'detail': t('account.form.title_detail'),
         'edit': t('account.form.title_edit'),
-        'auth': t('account.form.title_auth'),
         'create': t('account.form.title_create'),
     };
 
     const createUser = useCallback(values => {
-        return api.auth.addUser(values, PAGE_ERROR_CONFIG).then(res => {
+        const profile = toProfilePayload(values);
+        const payload = values.is_superadmin
+            ? toPermissionPayload({
+                ...profile,
+                permission_preset: PERMISSION_PRESETS.SUPER_ADMIN,
+            })
+            : profile;
+        return api.auth.addUser(payload, PAGE_ERROR_CONFIG).then(res => {
             if (res.status === 200) {
                 message.success(t('common.msg.create_success'));
                 onCancel();
                 refresh();
+                onCreated?.({
+                    user_id: res.data?.id,
+                    user_name: values.user_name,
+                    is_superadmin: Boolean(values.is_superadmin),
+                });
                 return;
             }
-            message.error(t('common.msg.operation_failed'));
-        }).catch(() => message.error(t('common.msg.operation_failed')));
-    }, [onCancel, refresh, t]);
-    const updateUser = useCallback(values => {
-        return api.auth.updateUser(data.id, values, PAGE_ERROR_CONFIG).then(res => {
-            if (res.status === 200) {
-                message.success(t('common.msg.update_success'));
-                onCancel();
-                refresh();
-
-                return;
+            throw res;
+        });
+    }, [onCancel, onCreated, refresh, t]);
+    const updateUser = useCallback(async values => {
+        const profile = toProfilePayload(values);
+        const superAdminChanged = permissionPresetsSupported
+            && Boolean(values.is_superadmin) !== Boolean(detail.is_superadmin);
+        const payload = superAdminChanged
+            ? toPermissionPayload({
+                ...profile,
+                permission_preset: values.is_superadmin
+                    ? PERMISSION_PRESETS.SUPER_ADMIN
+                    : PERMISSION_PRESETS.GS_READ_ONLY,
+            })
+            : profile;
+        const requestUpdate = async update => {
+            const response = await api.auth.updateUser(
+                data.id, update, PAGE_ERROR_CONFIG
+            );
+            if (response.status !== 200) {
+                throw response;
             }
-
-            message.error(t('common.msg.operation_failed'));
-        }).catch(() => message.error(t('common.msg.operation_failed')));
-    }, [onCancel, refresh, data.id, t]);
-
-    const updateUserAuth = useCallback(values => {
-        return api.auth.updateAdminspace(data.id, values.adminSpaces, PAGE_ERROR_CONFIG).then(res => {
-            if (res.status === 200) {
-                message.success(t('common.msg.set_success'));
-                onCancel();
-                refresh();
-
-                return;
-            }
-
-            message.error(t('common.msg.operation_failed'));
-        }).catch(() => message.error(t('common.msg.operation_failed')));
-    }, [data.id, onCancel, refresh, t]);
+        };
+        if (superAdminChanged && profile.user_password) {
+            throw new Error(t('account.feedback.password_permission_separate'));
+        }
+        await requestUpdate(payload);
+        message.success(t('common.msg.update_success'));
+        onCancel();
+        refresh();
+    }, [
+        data.id,
+        detail.is_superadmin,
+        onCancel,
+        permissionPresetsSupported,
+        refresh,
+        t,
+    ]);
 
     const onFinish = useCallback(async () => {
         if (submitPending.current || loading) {
@@ -105,6 +141,7 @@ const EditLayer = ({
 
         submitPending.current = true;
         setSubmitting(true);
+        setMutationError(null);
         try {
             const values = await form.validateFields();
             if (op === 'create') {
@@ -115,26 +152,27 @@ const EditLayer = ({
                 await updateUser(values);
             }
 
-            if (op === 'auth') {
-                await updateUserAuth(values);
-            }
         }
         catch (error) {
             if (!error || !error.errorFields) {
-                message.error(t('common.msg.operation_failed'));
+                const detail = accountErrorMessage(
+                    error, t('account.feedback.save_retry')
+                );
+                setMutationError(detail);
+                message.error(detail);
             }
         }
         finally {
             submitPending.current = false;
             setSubmitting(false);
         }
-    }, [createUser, form, loading, op, t, updateUser, updateUserAuth]);
+    }, [createUser, form, loading, op, t, updateUser]);
 
     useEffect(() => {
         if (!visible) {
             detailRequest.current += 1;
             setDetail({});
-            setGraphspaceList([]);
+            setMutationError(null);
             form.resetFields();
             setLoading(false);
             return;
@@ -142,29 +180,6 @@ const EditLayer = ({
 
         const request = detailRequest.current + 1;
         detailRequest.current = request;
-        setGraphspaceList([]);
-        if (op !== 'detail') {
-            api.manage.getGraphSpaceList(undefined, PAGE_ERROR_CONFIG).then(res => {
-                if (detailRequest.current !== request) {
-                    return;
-                }
-
-                if (res.status === 200) {
-                    setGraphspaceList(res.data.records.map(item => ({
-                        label: item.name,
-                        value: item.name,
-                    })));
-                    return;
-                }
-
-                message.error(t('common.msg.load_failed'));
-            }).catch(() => {
-                if (detailRequest.current === request) {
-                    message.error(t('common.msg.load_failed'));
-                }
-            });
-        }
-
         if (data.id) {
             setLoading(true);
             setDetail({});
@@ -202,9 +217,10 @@ const EditLayer = ({
         else {
             setDetail({});
             form.resetFields();
+            form.setFieldsValue({user_name: data.user_name});
             setLoading(false);
         }
-    }, [visible, data.id, form, op, t]);
+    }, [visible, data.id, data.user_name, form, op, t]);
 
     if (op !== 'detail' && !allowedOperations[op]) {
         return null;
@@ -233,18 +249,32 @@ const EditLayer = ({
                             <Form.Item label={t('account.form.name')} className={style.item}>
                                 {detail.user_nickname}
                             </Form.Item>
-                            <Form.Item label={t('account.form.is_superadmin')} className={style.item}>
-                                {detail.is_superadmin ? t('common.yes') : t('common.no')}
-                            </Form.Item>
-                            <Form.Item label={t('account.form.level')} className={style.item}>
-                                {t(`account.level.${getAccountLevel(detail)}`)}
+                            <Form.Item
+                                label={t('account.form.permission_preset')}
+                                className={style.item}
+                            >
+                                {t(`account.permission_preset.${
+                                    standalone
+                                    && detail.permission_preset
+                                    === PERMISSION_PRESETS.GS_READ_WRITE
+                                        ? PERMISSION_PRESETS.GS_READ_WRITE
+                                        : getAccountPresetLabelKey(
+                                            detail,
+                                            permissionPresetsSupported
+                                        )
+                                }`)}
                             </Form.Item>
                             <Form.Item label={t('account.form.remark')} className={style.item}>
                                 {detail.user_description}
                             </Form.Item>
-                            <Form.Item label={t('account.form.permission')} className={style.item}>
-                                {detail.adminSpaces ? detail.adminSpaces.join(',') : ''}
-                            </Form.Item>
+                            {!standalone && (
+                                <Form.Item
+                                    label={t('account.form.graphspaces')}
+                                    className={style.item}
+                                >
+                                    {getPresetSpaces(detail).join(', ')}
+                                </Form.Item>
+                            )}
                             <Form.Item label={t('account.col.create_time')} className={style.item}>
                                 {detail.user_create}
                             </Form.Item>
@@ -263,6 +293,14 @@ const EditLayer = ({
                     width={600}
                 >
                     <Spin spinning={loading}>
+                        {mutationError && (
+                            <Alert
+                                type='error'
+                                showIcon
+                                message={t('account.feedback.save_failed')}
+                                description={mutationError}
+                            />
+                        )}
                         <Form
                             labelCol={{span: 6}}
                             // initialValues={data}
@@ -285,23 +323,10 @@ const EditLayer = ({
                                     <Form.Item
                                         label={<HelpLabel t={t} labelKey='account.form.name' />}
                                         name="user_nickname"
-                                        rules={[rules.required(), rules.isAccountName]}
+                                        rules={[rules.isAccountName]}
                                         validateFirst
                                     >
                                         <Input placeholder={t('account.form.name_placeholder')} />
-                                    </Form.Item>
-                                    <Form.Item
-                                        label={<HelpLabel t={t} labelKey='account.form.is_superadmin' />}
-                                        name="is_superadmin"
-                                        valuePropName="checked"
-                                    >
-                                        <Switch />
-                                    </Form.Item>
-                                    <Form.Item
-                                        label={<HelpLabel t={t} labelKey='account.form.remark' />}
-                                        name="user_description"
-                                    >
-                                        <Input placeholder={t('account.form.remark_placeholder')} />
                                     </Form.Item>
                                     <Form.Item
                                         label={<HelpLabel t={t} labelKey='account.form.default_password' />}
@@ -316,20 +341,27 @@ const EditLayer = ({
                                         />
                                     </Form.Item>
                                     <Form.Item
-                                        label={<HelpLabel t={t} labelKey='account.form.permission' />}
-                                        name="adminSpaces"
+                                        label={<HelpLabel t={t} labelKey='account.form.remark' />}
+                                        name="user_description"
                                     >
-                                        <Select options={graphspaceList} mode="multiple" />
+                                        <Input placeholder={t('account.form.remark_placeholder')} />
                                     </Form.Item>
+                                    {permissionPresetsSupported && (
+                                        <Form.Item
+                                            label={(
+                                                <HelpLabel
+                                                    t={t}
+                                                    labelKey='account.form.is_superadmin'
+                                                />
+                                            )}
+                                            name="is_superadmin"
+                                            valuePropName="checked"
+                                            initialValue={false}
+                                        >
+                                            <Switch />
+                                        </Form.Item>
+                                    )}
                                 </>
-                            )}
-                            {op === 'auth' && (
-                                <Form.Item
-                                    label={<HelpLabel t={t} labelKey='account.form.permission' />}
-                                    name="adminSpaces"
-                                >
-                                    <Select options={graphspaceList} mode="multiple" />
-                                </Form.Item>
                             )}
                         </Form>
                     </Spin>

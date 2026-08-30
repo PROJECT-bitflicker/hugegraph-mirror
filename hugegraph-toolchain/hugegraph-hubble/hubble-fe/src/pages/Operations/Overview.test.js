@@ -80,8 +80,10 @@ test('keeps unknown and partial source states explicit', async () => {
     expect(await screen.findByText('Attention')).toBeInTheDocument();
     expect(screen.getByRole('radiogroup', {name: 'Overview view'}))
         .toBeInTheDocument();
-    expect(screen.getByText('Malformed')).toBeInTheDocument();
-    expect(screen.getByText('Unsupported')).toBeInTheDocument();
+    expect(screen.getByLabelText(/PD.*Abnormal - Unavailable.*Malformed/))
+        .toBeInTheDocument();
+    expect(screen.getByLabelText(/Store.*Not applicable in this deployment/))
+        .toBeInTheDocument();
     expect(screen.getByText(/stale/i)).toBeInTheDocument();
 });
 
@@ -353,7 +355,8 @@ test('uses explicit Chinese topology labels and a compact monitoring tool status
     renderOverview();
 
     expect(await screen.findByRole('radio', {name: '拓扑图'})).toBeInTheDocument();
-    expect(screen.getByRole('heading', {name: '服务拓扑图'})).toBeInTheDocument();
+    expect(screen.getByRole('heading', {name: 'HugeGraph 集群拓扑'}))
+        .toBeInTheDocument();
     expect(screen.getByRole('link', {name: 'Server 层'})).toBeInTheDocument();
     const tools = document.querySelector('.operations-header-tools');
     expect(tools).not.toHaveTextContent('Dashboard 不可用');
@@ -382,7 +385,7 @@ test('shows a bounded, failure-first list of nodes needing attention', async () 
 
     renderOverview();
 
-    const attention = await screen.findByRole('region', {name: 'Nodes needing attention'});
+    const attention = await screen.findByRole('region', {name: 'Items needing attention'});
     const rows = within(attention).getAllByRole('row').slice(1);
     expect(rows).toHaveLength(5);
     expect(rows.map(row => row.textContent)).toEqual([
@@ -393,6 +396,39 @@ test('shows a bounded, failure-first list of nodes needing attention', async () 
         expect.stringContaining('unknown a'),
     ]);
 });
+
+test('shows the recovery reason for unavailable Store metrics without stale copy',
+    async () => {
+        getOverview.mockResolvedValue({
+            status: 'DEGRADED',
+            observed_at: 1000,
+            sources: {},
+            facts: {},
+            nodes: [{
+                id: 'store-untrusted',
+                name: 'store-untrusted',
+                type: 'STORE',
+                status: 'UP',
+                metric_statuses: {
+                    system: {
+                        availability: 'UNAVAILABLE',
+                        stale: false,
+                        reason: 'metrics_target_untrusted',
+                    },
+                },
+            }],
+        });
+
+        renderOverview();
+
+        const attention = await screen.findByRole('region', {
+            name: 'Items needing attention',
+        });
+        expect(within(attention).getByRole('img', {
+            name: /operations\.store\.allowed_targets/,
+        })).toBeInTheDocument();
+        expect(within(attention).queryByText('Stale')).not.toBeInTheDocument();
+    });
 
 test('keeps every failed source visible when the whole cluster is down', async () => {
     getOverview.mockResolvedValue({
@@ -415,8 +451,9 @@ test('keeps every failed source visible when the whole cluster is down', async (
 
     const sources = await screen.findByRole('region', {name: 'Source freshness'});
     expect(within(sources).getAllByText('DOWN')).toHaveLength(3);
-    expect(within(sources).getAllByText('Unavailable')).toHaveLength(3);
-    expect(screen.getByRole('region', {name: 'Nodes needing attention'}))
+    expect(within(sources).getAllByLabelText(/Abnormal - Unavailable/))
+        .toHaveLength(3);
+    expect(screen.getByRole('region', {name: 'Items needing attention'}))
         .toBeInTheDocument();
 });
 
@@ -445,8 +482,10 @@ test('keeps healthy freshness compact but preserves stale-source recovery contex
     renderOverview();
 
     const sources = await screen.findByRole('region', {name: 'Source freshness'});
-    expect(within(sources).getAllByText(/Last success/)).toHaveLength(1);
+    expect(within(sources).queryByText(/Last success/)).not.toBeInTheDocument();
     expect(within(sources).getByText(/Stale/)).toBeInTheDocument();
+    expect(within(sources).getByLabelText(/Last observed.*Stale/))
+        .toBeInTheDocument();
 });
 
 test('shows a concise healthy state when no node needs attention', async () => {
@@ -461,6 +500,80 @@ test('shows a concise healthy state when no node needs attention', async () => {
     renderOverview();
 
     expect(await screen.findByText('All discovered nodes are healthy')).toBeInTheDocument();
+});
+
+test('explains PD cluster attention while keeping healthy nodes explicit', async () => {
+    getOverview.mockResolvedValue({
+        status: 'DEGRADED',
+        reason: 'cluster_not_ready',
+        observed_at: 1000,
+        sources: {
+            server: {status: 'UP', availability: 'AVAILABLE'},
+            pd: {status: 'UP', availability: 'AVAILABLE'},
+            stores: {status: 'UP', availability: 'AVAILABLE'},
+        },
+        facts: {},
+        nodes: [
+            {id: 'pd-1', name: 'pd-1', type: 'PD', status: 'UP', role: 'LEADER'},
+            {
+                id: 'pd-2',
+                name: 'pd-2',
+                type: 'PD',
+                status: 'UP',
+                role: 'FOLLOWER',
+                metric_statuses: {
+                    system: {
+                        availability: 'UNSUPPORTED',
+                        reason: 'metrics_not_collected',
+                    },
+                },
+            },
+        ],
+    });
+
+    renderOverview();
+
+    const attention = await screen.findByRole('region', {
+        name: 'Items needing attention',
+    });
+    expect(within(attention).getByText('Cluster state needs attention'))
+        .toBeInTheDocument();
+    expect(within(attention).getByText(/PD reports Cluster_Not_Ready/))
+        .toBeInTheDocument();
+    expect(within(attention).getByRole('link', {name: 'View all nodes'}))
+        .toHaveAttribute('href', '/operations/nodes');
+    expect(within(attention).getByText(
+        'All nodes are healthy; the source or cluster state above is a separate signal.'
+    )).toBeInTheDocument();
+    expect(within(attention).queryByRole('table')).not.toBeInTheDocument();
+});
+
+test('shows failed sources even when discovery returned no nodes', async () => {
+    getOverview.mockResolvedValue({
+        status: 'DOWN',
+        observed_at: 1000,
+        sources: {
+            server: {
+                status: 'DOWN',
+                availability: 'UNAVAILABLE',
+                reason: 'upstream_unavailable',
+            },
+            pd: {status: 'UNSUPPORTED', availability: 'UNSUPPORTED'},
+            stores: {status: 'UNSUPPORTED', availability: 'UNSUPPORTED'},
+        },
+        facts: {},
+        nodes: [],
+    });
+
+    renderOverview();
+
+    const attention = await screen.findByRole('region', {
+        name: 'Items needing attention',
+    });
+    expect(within(attention).getByText('Server source needs attention'))
+        .toBeInTheDocument();
+    expect(within(attention).getByText('Upstream unavailable'))
+        .toBeInTheDocument();
 });
 
 test('switches between the topology and an accessible node list', async () => {
@@ -495,11 +608,9 @@ test('renders leader, capacity and attention facts in the visual hierarchy', asy
             pd_leader: 'pd-1',
             stores_up: 22,
             stores: 24,
-            capacity_used: 38.2,
-            capacity_total: 60,
-            capacity_unit: 'TB',
-            data_size: 14.6,
-            data_size_unit: 'TB',
+            capacity_used_bytes: 40_802_189_312,
+            capacity_total_bytes: 64_424_509_440,
+            data_size_bytes: 15_676_565_504,
         },
         nodes: [
             {id: 'store-3', name: 'store-3', type: 'STORE', status: 'DOWN'},
@@ -515,10 +626,12 @@ test('renders leader, capacity and attention facts in the visual hierarchy', asy
     expect(screen.getByText('1 Store is down')).toBeInTheDocument();
     expect(screen.getByText('PD Leader')).toBeInTheDocument();
     expect(screen.getByText('pd-1')).toBeInTheDocument();
+    expect(screen.getByText('14.6 GB')).toBeInTheDocument();
+    expect(screen.getByText('38 GB / 60 GB (63%)')).toBeInTheDocument();
     expect(screen.getByRole('progressbar', {name: 'Capacity'})).toHaveAttribute(
-        'aria-valuenow', '64'
+        'aria-valuenow', '63'
     );
-    const attention = screen.getByRole('region', {name: 'Nodes needing attention'});
+    const attention = screen.getByRole('region', {name: 'Items needing attention'});
     expect(within(attention).getByRole('table')).toBeInTheDocument();
     expect(within(attention).getByRole('columnheader', {name: 'Tier'}))
         .toBeInTheDocument();

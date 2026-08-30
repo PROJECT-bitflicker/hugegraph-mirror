@@ -44,7 +44,7 @@ public class OperationsPayloadParserTest {
                          "\"dataPath\":\"/secret/leader\",\"role\":\"Leader\"," +
                          "\"serviceVersion\":\"1.7.0\"}," +
                          "\"graphSize\":2,\"partitionSize\":12," +
-                         "\"shardCount\":3}}";
+                         "\"shardCount\":3,\"dataSize\":5}}";
         String stores = "{\"status\":0,\"data\":{\"stores\":[{" +
                         "\"storeId\":\"7\",\"address\":\"store-a:8500\"," +
                         "\"deployPath\":\"/secret/bin\"," +
@@ -60,6 +60,12 @@ public class OperationsPayloadParserTest {
         Assert.assertEquals(2L, topology.getFacts().get("graphs"));
         Assert.assertEquals(12L, topology.getFacts().get("partitions"));
         Assert.assertEquals(3L, topology.getFacts().get("replicas"));
+        Assert.assertEquals(5120L,
+                            topology.getFacts().get("data_size_bytes"));
+        Assert.assertEquals(1000L,
+                            topology.getFacts().get("capacity_total_bytes"));
+        Assert.assertEquals(600L,
+                            topology.getFacts().get("capacity_used_bytes"));
         List<Node> nodes = topology.getNodes();
         Assert.assertEquals(3, nodes.size());
         Assert.assertEquals("LEADER", nodes.get(1).getRole());
@@ -73,6 +79,51 @@ public class OperationsPayloadParserTest {
         Assert.assertFalse(serialized.contains("store-a:8500"));
         Assert.assertFalse(serialized.contains("pd-a:8620"));
         Assert.assertFalse(serialized.contains("/secret"));
+    }
+
+    @Test
+    public void testOmitsIncompleteOrOverflowingSizeFacts() {
+        String cluster = "{\"status\":0,\"data\":{" +
+                         "\"pdList\":[],\"dataSize\":9223372036854775807}}";
+        String stores = "{\"status\":0,\"data\":{\"stores\":[{" +
+                        "\"storeId\":\"1\",\"capacity\":1000},{" +
+                        "\"storeId\":\"2\",\"capacity\":1000," +
+                        "\"available\":2000}]}}";
+
+        Topology topology = new OperationsPayloadParser(MAPPER)
+                            .parseTopology(cluster, stores);
+
+        Assert.assertFalse(topology.getFacts().containsKey("data_size_bytes"));
+        Assert.assertFalse(topology.getFacts().containsKey(
+                           "capacity_total_bytes"));
+        Assert.assertFalse(topology.getFacts().containsKey(
+                           "capacity_used_bytes"));
+    }
+
+    @Test
+    public void testMapsExactClusterStates() {
+        OperationsPayloadParser parser = new OperationsPayloadParser(MAPPER);
+        String[] states = {"Cluster_OK", "Cluster_Warn", "DEGRADED",
+                           "Cluster_Not_Ready", "Cluster_Offline",
+                           "Cluster_Fault", null, "Cluster_OKish"};
+        String[] expected = {"UP", "DEGRADED", "DEGRADED", "DEGRADED",
+                             "DEGRADED", "DOWN", "UNKNOWN", "UNKNOWN"};
+        String[] reasons = {null, "cluster_warn", "cluster_warn",
+                            "cluster_not_ready",
+                            "cluster_offline", "cluster_fault",
+                            "cluster_state_missing", "cluster_state_unknown"};
+        String stores = "{\"status\":0,\"data\":{\"stores\":[]}}";
+
+        for (int i = 0; i < states.length; i++) {
+            String state = states[i];
+            String field = state == null ? "" : "\"state\":\"" +
+                           state + "\",";
+            String cluster = "{\"status\":0,\"data\":{" + field +
+                             "\"pdList\":[]}}";
+            Topology topology = parser.parseTopology(cluster, stores);
+            Assert.assertEquals(expected[i], topology.getStatus());
+            Assert.assertEquals(reasons[i], topology.getReason());
+        }
     }
 
     @Test
@@ -209,6 +260,25 @@ public class OperationsPayloadParserTest {
         Assert.assertEquals(100D, metrics.get("heap_used_bytes"));
         Assert.assertEquals(20D, metrics.get("nonheap_used_bytes"));
         Assert.assertFalse(metrics.toString().contains("secret"));
+    }
+
+    @Test
+    public void testParsesUnlabelledPdPrometheusMetrics() {
+        OperationsPayloadParser parser = new OperationsPayloadParser(MAPPER);
+        String payload = "process_uptime_seconds 12\n" +
+                         "system_cpu_count 2\n" +
+                         "jvm_threads_live_threads 8\n" +
+                         "process_cpu_usage 0.1\n" +
+                         "system_cpu_usage 0.2\n" +
+                         "process_uptime_seconds_total 99\n";
+
+        Map<String, Object> metrics = parser.parsePdPrometheusMetrics(payload);
+
+        Assert.assertEquals(12D, metrics.get("uptime_seconds"));
+        Assert.assertEquals(2D, metrics.get("cpu_count"));
+        Assert.assertEquals(8D, metrics.get("threads_live"));
+        Assert.assertEquals(0.1D, metrics.get("process_cpu_usage"));
+        Assert.assertEquals(0.2D, metrics.get("system_cpu_usage"));
     }
 
     @Test(expected = MalformedUpstreamException.class)

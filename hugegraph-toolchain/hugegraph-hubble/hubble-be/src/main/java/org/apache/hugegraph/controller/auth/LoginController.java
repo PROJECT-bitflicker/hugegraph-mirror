@@ -75,6 +75,10 @@ public class LoginController extends BaseController {
 
     @PostMapping("/login")
     public Object login(@RequestBody Login login) {
+        if (this.authMode != null && this.authMode.anonymous()) {
+            throw new ExternalException(HttpStatus.FORBIDDEN.value(),
+                                        "Authentication is disabled");
+        }
         String address = this.getRequest().getRemoteAddr();
         boolean pdEnabled = this.config.get(HubbleOptions.PD_ENABLED);
         this.loginAttemptGuard.checkAllowed(login.name(), address);
@@ -83,13 +87,21 @@ public class LoginController extends BaseController {
         try {
             LoginResult result = this.authenticate(login, pdEnabled, address);
             Object user;
+            boolean requiresBasicGremlinAuth;
             if (!pdEnabled) {
                 user = currentUser(login.name());
+                try (HugeClient client =
+                             this.createLoginTokenClient(result.token())) {
+                    requiresBasicGremlinAuth =
+                            client.requiresBasicGremlinAuth();
+                }
             } else {
                 try (HugeClient client =
                              this.createLoginTokenClient(result.token())) {
                     client.assignGraph(PDHugeClientFactory.DEFAULT_GRAPHSPACE,
                                        null);
+                    requiresBasicGremlinAuth =
+                            client.requiresBasicGremlinAuth();
                     UserEntity entity = this.userService.getpersonal(
                             client, login.name());
                     user = entity;
@@ -100,6 +112,18 @@ public class LoginController extends BaseController {
             this.getRequest().changeSessionId();
             this.setUser(login.name());
             this.setToken(result.token());
+            // HugeGraph 1.7's Gremlin HTTP channel only accepts Basic auth.
+            // Keep the credential server-side for the session lifetime so
+            // graph queries can use the same identity as REST requests.
+            if (requiresBasicGremlinAuth) {
+                this.setSession(Constant.PASSWORD_KEY, login.password());
+                this.setSession(Constant.PASSWORD_EXPIRE_AT_KEY,
+                                System.currentTimeMillis() +
+                                TOKEN_EXPIRE_SECONDS * 1000L);
+            } else {
+                this.delSession(Constant.PASSWORD_KEY);
+                this.delSession(Constant.PASSWORD_EXPIRE_AT_KEY);
+            }
             return user;
         } catch (Throwable e) {
             this.clearAuthSession();
@@ -225,6 +249,9 @@ public class LoginController extends BaseController {
 
     @GetMapping("/status")
     public Object status() {
+        if (this.authMode != null && this.authMode.anonymous()) {
+            return ImmutableMap.of("level", "ANONYMOUS");
+        }
 
         HugeClient client = authClient(null, null);
 

@@ -184,6 +184,16 @@
     text-align: right;
 }
 
+.operations-source-summary {
+    min-width: 0;
+    margin-left: auto;
+    overflow: hidden;
+    color: var(--workbench-color-text-tertiary);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .operations-source-strip.is-detailed .operations-source {
     align-items: flex-start;
     flex-wrap: wrap;
@@ -335,6 +345,14 @@
 
     .operations-health {
         grid-column: 2;
+        min-width: 0;
+        flex-wrap: wrap;
+        row-gap: 2px;
+        white-space: normal;
+
+        .operations-health-stale {
+            white-space: nowrap;
+        }
     }
 }
 
@@ -437,6 +455,14 @@
     margin-top: 16px;
 
     p { margin-bottom: 0; color: var(--workbench-color-text-secondary); }
+}
+
+.operations-source-attention {
+    margin-bottom: 12px;
+}
+
+.operations-nodes-healthy {
+    padding-top: 2px;
 }
 
 .operations-attention-heading {
@@ -618,10 +644,16 @@
 
 .operations-metric-status {
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
     gap: 4px 10px;
     color: var(--workbench-color-text-secondary);
     font-size: 12px;
+}
+
+.operations-metric-fresh {
+    color: #237804;
+    font-size: 14px;
 }
 
 .operations-metric-empty {
@@ -673,8 +705,9 @@
 .operations-memory-usage {
     min-width: 0;
     padding: 12px 14px;
+    border: 1px solid var(--workbench-color-border);
     border-radius: var(--workbench-radius);
-    background: var(--workbench-color-canvas);
+    background: var(--workbench-color-surface);
 
     > div:first-child {
         display: flex;
@@ -700,7 +733,8 @@
     grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
     gap: 10px;
 
-    .ant-statistic {
+    .ant-statistic,
+    .operations-statistic-card {
         min-width: 0;
         padding: 10px 12px;
         border: 1px solid var(--workbench-color-border);
@@ -713,11 +747,27 @@
     }
 }
 
-.operations-system-details {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 20px;
+.operations-group-statistics {
+    padding-top: 16px;
+}
+
+.operations-statistic-title {
+    display: block;
     color: var(--workbench-color-text-secondary);
+    font-size: 14px;
+    line-height: 22px;
+}
+
+.operations-statistic-value {
+    margin-top: 4px;
+    color: var(--workbench-color-text);
+    font-size: 20px;
+    line-height: 30px;
+
+    > div {
+        font-size: 14px;
+        line-height: 22px;
+    }
 }
 
 section.operations-metric-group .ant-descriptions-view .ant-descriptions-item-content {

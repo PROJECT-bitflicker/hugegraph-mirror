@@ -22,6 +22,7 @@ import java.lang.reflect.Field;
 import java.util.Map;
 
 import org.junit.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -39,6 +40,7 @@ import org.apache.hugegraph.exception.ForbiddenException;
 import org.apache.hugegraph.handler.ExceptionAdvisor;
 import org.apache.hugegraph.options.HubbleOptions;
 import org.apache.hugegraph.service.auth.UserService;
+import org.apache.hugegraph.service.auth.AuthModeService;
 import org.apache.hugegraph.service.graphs.GraphsService;
 import org.apache.hugegraph.service.space.GraphSpaceService;
 import org.apache.hugegraph.structure.space.GraphSpace;
@@ -95,6 +97,7 @@ public class GraphSpaceControllerTest {
         HugeConfig config = Mockito.mock(HugeConfig.class);
         Mockito.when(config.get(HubbleOptions.PD_ENABLED)).thenReturn(true);
         controller.config = config;
+        ReflectionTestUtils.setField(controller, "userService", userService);
         ReflectionTestUtils.setField(controller, "graphSpaceService", service);
 
         @SuppressWarnings("unchecked")
@@ -105,6 +108,98 @@ public class GraphSpaceControllerTest {
         Assert.assertFalse(detail.containsKey("dp_username"));
         Assert.assertFalse(detail.containsKey("dp_password"));
         Assert.assertFalse(detail.containsKey("configs"));
+    }
+
+    @Test
+    public void testAnonymousEndpointsUseOnlyPublicGraphSpaces() {
+        HugeClient client = Mockito.mock(HugeClient.class);
+        GraphSpaceService graphSpaceService = Mockito.mock(
+                                                GraphSpaceService.class);
+        TestGraphSpaceController controller =
+                new TestGraphSpaceController(client);
+        HugeConfig config = Mockito.mock(HugeConfig.class);
+        Mockito.when(config.get(HubbleOptions.PD_ENABLED)).thenReturn(true);
+        AuthModeService authMode = Mockito.mock(AuthModeService.class);
+        Mockito.when(authMode.anonymous()).thenReturn(true);
+        Mockito.when(graphSpaceService.listAnonymous(client))
+               .thenReturn(java.util.Collections.singletonList("public"));
+        Mockito.when(graphSpaceService.getAnonymous(client, "public"))
+               .thenReturn(java.util.Collections.singletonMap("name", "public"));
+        Mockito.when(graphSpaceService.isAuthForAnonymous(client, "public"))
+               .thenReturn(false);
+        controller.config = config;
+        ReflectionTestUtils.setField(controller, "authMode", authMode);
+        ReflectionTestUtils.setField(controller, "graphSpaceService",
+                                     graphSpaceService);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> names = (Map<String, Object>) controller.list();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> detail =
+                (Map<String, Object>) controller.get("public");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> auth =
+                (Map<String, Object>) controller.isAuth("public");
+
+        Assert.assertEquals(java.util.Collections.singletonList("public"),
+                            names.get("graphspaces"));
+        Assert.assertEquals("public", detail.get("name"));
+        Assert.assertEquals(false, auth.get("auth"));
+        Mockito.verify(graphSpaceService, Mockito.never()).listAll(client);
+        Mockito.verify(graphSpaceService, Mockito.never())
+               .isAuth(client, "public");
+        Mockito.verify(graphSpaceService, Mockito.never())
+               .getWithoutAdmins(client, "public");
+        Mockito.verify(graphSpaceService, Mockito.never())
+               .evCount(client, "public");
+    }
+
+    @Test
+    public void testAuthenticatedEndpointsUseOnlyAccessibleGraphSpaces() {
+        HugeClient client = Mockito.mock(HugeClient.class);
+        UserService userService = Mockito.mock(UserService.class);
+        GraphSpaceService graphSpaceService = Mockito.mock(
+                                                GraphSpaceService.class);
+        TestGraphSpaceController controller =
+                new TestGraphSpaceController(client);
+        HugeConfig config = Mockito.mock(HugeConfig.class);
+        Mockito.when(config.get(HubbleOptions.PD_ENABLED)).thenReturn(true);
+        Mockito.when(userService.isSuperAdmin(client)).thenReturn(false);
+        Mockito.when(graphSpaceService.listAccessible(client))
+               .thenReturn(java.util.Collections.singletonList("member"));
+        Mockito.when(graphSpaceService.isAuthForAccessible(client, "member"))
+               .thenReturn(true);
+        GraphSpaceEntity entity = new GraphSpaceEntity();
+        entity.setName("member");
+        Mockito.when(graphSpaceService.getAccessibleWithAdmins(client,
+                                                               "member"))
+               .thenReturn(entity);
+        Mockito.when(graphSpaceService.toView(entity))
+               .thenReturn(java.util.Collections.singletonMap("name",
+                                                               "member"));
+        controller.config = config;
+        ReflectionTestUtils.setField(controller, "userService", userService);
+        ReflectionTestUtils.setField(controller, "graphSpaceService",
+                                     graphSpaceService);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> names = (Map<String, Object>) controller.list();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> detail =
+                (Map<String, Object>) controller.get("member");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> auth =
+                (Map<String, Object>) controller.isAuth("member");
+
+        Assert.assertEquals(java.util.Collections.singletonList("member"),
+                            names.get("graphspaces"));
+        Assert.assertEquals("member", detail.get("name"));
+        Assert.assertEquals(true, auth.get("auth"));
+        Mockito.verify(graphSpaceService, Mockito.never()).listAll(client);
+        Mockito.verify(graphSpaceService, Mockito.never())
+               .isAuth(client, "member");
+        Mockito.verify(graphSpaceService, Mockito.never())
+               .getWithAdmins(client, "member");
     }
 
     @Test
@@ -145,6 +240,38 @@ public class GraphSpaceControllerTest {
     }
 
     @Test
+    public void testCreateUsesHubbleAuthenticationMode() throws Exception {
+        HugeClient client = Mockito.mock(HugeClient.class);
+        UserService userService = Mockito.mock(UserService.class);
+        GraphSpaceService graphSpaceService = Mockito.mock(
+                                                GraphSpaceService.class);
+        TestGraphSpaceController controller = controller(
+                                              client, userService,
+                                              graphSpaceService);
+        AuthModeService authMode = Mockito.mock(AuthModeService.class);
+        Mockito.when(authMode.enabled()).thenReturn(true);
+        Mockito.when(userService.isSuperAdmin(client)).thenReturn(true);
+        ReflectionTestUtils.setField(controller, "authMode", authMode);
+
+        GraphSpaceEntity graphSpace = new GraphSpaceEntity();
+        graphSpace.setName("secured");
+        graphSpace.setAuth(false);
+        Mockito.when(graphSpaceService.getWithAdmins(client, "secured"))
+               .thenReturn(graphSpace);
+        Mockito.when(graphSpaceService.toView(graphSpace))
+               .thenReturn(java.util.Collections.singletonMap("name",
+                                                               "secured"));
+
+        controller.add(graphSpace);
+
+        ArgumentCaptor<GraphSpace> created =
+                ArgumentCaptor.forClass(GraphSpace.class);
+        Mockito.verify(graphSpaceService).create(Mockito.eq(client),
+                                                 created.capture());
+        Assert.assertTrue(created.getValue().isAuth());
+    }
+
+    @Test
     public void testOnlySuperadminCanMutateGraphSpaces() throws Exception {
         HugeClient client = Mockito.mock(HugeClient.class);
         UserService userService = Mockito.mock(UserService.class);
@@ -164,6 +291,26 @@ public class GraphSpaceControllerTest {
         Mockito.verifyZeroInteractions(graphSpaceService);
         Mockito.when(userService.isSuperAdmin(client)).thenReturn(true);
         Assert.assertSame(client, controller.requireGlobalManager());
+    }
+
+    @Test
+    public void testAnonymousModeCannotMutateGraphSpaces() throws Exception {
+        HugeClient client = Mockito.mock(HugeClient.class);
+        UserService userService = Mockito.mock(UserService.class);
+        GraphSpaceService graphSpaceService = Mockito.mock(
+                                                GraphSpaceService.class);
+        TestGraphSpaceController controller = controller(
+                                              client, userService,
+                                              graphSpaceService);
+        HugeConfig config = Mockito.mock(HugeConfig.class);
+        AuthModeService authMode = Mockito.mock(AuthModeService.class);
+        Mockito.when(authMode.anonymous()).thenReturn(true);
+        ReflectionTestUtils.setField(controller, "authMode",
+                                     authMode);
+
+        assertForbidden(() -> controller.add(new GraphSpaceEntity()));
+
+        Mockito.verifyZeroInteractions(userService, graphSpaceService);
     }
 
     @Test

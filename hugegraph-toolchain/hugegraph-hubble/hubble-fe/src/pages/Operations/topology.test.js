@@ -16,9 +16,16 @@
  * under the License.
  */
 
+import JSONbig from 'json-bigint';
 import {
     selectTierNodes,
     selectAttentionNodes,
+    selectAttentionSources,
+    hasStaleMetrics,
+    hasMetricIssues,
+    metricIssueReason,
+    formatBytes,
+    ratioPercent,
     formatMetricValue,
     formatObservedAge,
     formatObservedAt,
@@ -88,12 +95,85 @@ test('treats stale metric snapshots as attention even while topology is up', () 
     expect(selectAttentionNodes([staleStore])).toEqual([staleStore]);
 });
 
+test('keeps metric availability separate from snapshot freshness', () => {
+    const unavailableStore = {
+        ...node('store-1', 'STORE'),
+        metric_statuses: {
+            system: {availability: 'UNAVAILABLE', stale: false},
+        },
+    };
+
+    expect(hasStaleMetrics(unavailableStore)).toBe(false);
+    expect(hasMetricIssues(unavailableStore)).toBe(true);
+    expect(metricIssueReason(unavailableStore)).toBe(null);
+    expect(selectAttentionNodes([unavailableStore])).toEqual([unavailableStore]);
+});
+
+test('exposes an unavailable metric recovery reason without marking it stale', () => {
+    const unavailableStore = {
+        ...node('store-1', 'STORE'),
+        metric_statuses: {
+            system: {
+                availability: 'UNAVAILABLE',
+                stale: false,
+                reason: 'metrics_target_untrusted',
+            },
+        },
+    };
+
+    expect(metricIssueReason(unavailableStore)).toBe(
+        'metrics_target_untrusted'
+    );
+    expect(hasStaleMetrics(unavailableStore)).toBe(false);
+});
+
+test('keeps source-level attention separate from unsupported node metrics', () => {
+    const sources = {
+        server: {status: 'UP', availability: 'AVAILABLE'},
+        pd: {
+            status: 'DEGRADED',
+            availability: 'AVAILABLE',
+            reason: 'cluster_not_ready',
+        },
+        stores: {status: 'UP', availability: 'AVAILABLE'},
+        optional: {status: 'UNKNOWN', availability: 'UNSUPPORTED'},
+    };
+
+    expect(selectAttentionSources(sources)).toEqual([{
+        name: 'pd',
+        status: 'DEGRADED',
+        availability: 'AVAILABLE',
+        reason: 'cluster_not_ready',
+    }]);
+    expect(selectAttentionNodes([{
+        ...node('pd-follower', 'PD'),
+        metric_statuses: {
+            system: {
+                availability: 'UNSUPPORTED',
+                reason: 'metrics_not_collected',
+            },
+        },
+    }])).toEqual([]);
+});
+
 test('never renders unknown values as zero or NaN', () => {
     expect(formatMetricValue(null)).toBe('Unavailable');
     expect(formatMetricValue(undefined)).toBe('Unavailable');
     expect(formatMetricValue(Number.NaN)).toBe('Unavailable');
     expect(formatMetricValue(0)).toBe('0');
     expect(formatMetricValue(null, '', '不可用')).toBe('不可用');
+});
+
+test('formats byte facts without inventing values', () => {
+    expect(formatBytes(0)).toBe('0 B');
+    expect(formatBytes(1536)).toBe('1.5 KB');
+    expect(formatBytes(null)).toBe(null);
+    expect(formatBytes(-1)).toBe(null);
+    const facts = JSONbig.parse(
+        '{"used":9007199254740993,"total":18014398509481986}'
+    );
+    expect(formatBytes(facts.used)).toBe('8 PB');
+    expect(ratioPercent(facts.used, facts.total)).toBe(50);
 });
 
 test('safely formats malformed observed timestamps', () => {

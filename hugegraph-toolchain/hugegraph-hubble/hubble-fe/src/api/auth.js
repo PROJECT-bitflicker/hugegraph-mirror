@@ -97,6 +97,30 @@ const getSpaceMembers = (graphspace, params, config = {}) => {
     return request.get(scopedAuthPath(graphspace, 'users'), {...config, params});
 };
 
+const getSpaceAccount = (graphspace, accountId, config = {}) => {
+    return request.get(scopedAuthPath(graphspace, 'users', accountId), config);
+};
+
+const getSpaceAdmins = (graphspace, params, config = {}) => {
+    return request.get(scopedAuthPath(graphspace, 'users/spaceadmin'), {...config, params});
+};
+
+const setSpaceAdmin = (graphspace, id, config) => {
+    return request.post(scopedAuthPath(graphspace, 'users/spaceadmin', id), undefined, config);
+};
+
+const removeSpaceAdmin = (graphspace, id, config) => {
+    return request.delete(scopedAuthPath(graphspace, 'users/spaceadmin', id), undefined, config);
+};
+
+const setSpacePreset = (graphspace, id, accountId, preset, config) => {
+    return request.put(`${scopedAuthPath(graphspace, 'users', id)}/preset`, {
+        user_id: id === accountId ? undefined : id,
+        username: accountId,
+        permission_preset: preset,
+    }, config);
+};
+
 const addSpaceMember = (graphspace, data, config) => {
     return request.post(scopedAuthPath(graphspace, 'users'), data, config);
 };
@@ -161,6 +185,11 @@ const deleteSpaceAccess = (graphspace, roleId, targetId, config) => {
 
 export {
     getSpaceMembers,
+    getSpaceAccount,
+    getSpaceAdmins,
+    setSpaceAdmin,
+    removeSpaceAdmin,
+    setSpacePreset,
     addSpaceMember,
     updateSpaceMember,
     deleteSpaceMember,
