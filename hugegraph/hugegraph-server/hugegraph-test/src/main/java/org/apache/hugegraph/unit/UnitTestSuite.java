@@ -28,6 +28,7 @@ import org.apache.hugegraph.core.RoleElectionStateMachineTest;
 import org.apache.hugegraph.meta.EtcdMetaDriverTest;
 import org.apache.hugegraph.meta.MetaManagerSchemaCacheClearEventTest;
 import org.apache.hugegraph.meta.managers.AuthMetaManagerTest;
+import org.apache.hugegraph.store.client.OrderedScanSecurityTest;
 import org.apache.hugegraph.traversal.optimize.TraversalUtilOptimizeTest;
 import org.apache.hugegraph.unit.api.auth.LoginAPITest;
 import org.apache.hugegraph.unit.api.filter.AccessLogFilterTest;
@@ -49,6 +50,7 @@ import org.apache.hugegraph.unit.core.BackendStoreInfoTest;
 import org.apache.hugegraph.unit.core.ConditionQueryFlattenTest;
 import org.apache.hugegraph.unit.core.ConditionTest;
 import org.apache.hugegraph.unit.core.DataTypeTest;
+import org.apache.hugegraph.unit.core.GraphSpaceInfoLocaleTest;
 import org.apache.hugegraph.unit.core.GraphManagerStoresWaitTest;
 import org.apache.hugegraph.unit.core.DirectionsTest;
 import org.apache.hugegraph.unit.core.ExceptionTest;
@@ -137,6 +139,7 @@ import org.junit.runners.Suite;
 
         /* types */
         DataTypeTest.class,
+        GraphSpaceInfoLocaleTest.class,
         GraphManagerStoresWaitTest.class,
         DirectionsTest.class,
         SerialEnumTest.class,
@@ -162,6 +165,7 @@ import org.junit.runners.Suite;
         QueryListTest.class,
         RangeTest.class,
         SecurityManagerTest.class,
+        OrderedScanSecurityTest.class,
         RolePermissionTest.class,
         ExceptionTest.class,
         GraphManagerAdminInitTest.class,
