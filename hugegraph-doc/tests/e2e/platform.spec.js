@@ -4,7 +4,7 @@ for (const locale of ["en", "cn"]) {
   const prefix = locale === "cn" ? "/cn" : "";
   test(`latest ${locale} sidebar persists and isolates collapse`, async ({ page }) => {
     await page.goto(`${prefix}/docs/introduction/`);
-    const key = `oink.sidebar.v2.latest.${locale}`;
+    const key = `oink.sidebar.v3.latest.${locale}`;
     await expect.poll(() => page.evaluate((name) => localStorage.getItem(name), key))
       .not.toBeNull();
     const toggle = page
@@ -21,28 +21,28 @@ for (const locale of ["en", "cn"]) {
     );
 
     await page.locator(".td-shell-sidebar__collapse").click();
-    await expect(page.locator("#td-shell-sidebar")).toHaveAttribute("aria-hidden", "true");
-    await expect(page.locator("#td-shell-sidebar")).toHaveJSProperty("inert", true);
-    const restore = page.locator(".hg-sidebar-restore");
+    await expect(page.locator(".td-shell-sidebar__panel")).toHaveAttribute("aria-hidden", "true");
+    await expect(page.locator(".td-shell-sidebar__panel > *").first()).toHaveJSProperty("inert", true);
+    const restore = page.locator(".td-shell-float [data-td-shell-sidebar-toggle]");
     await expect(restore).toBeVisible();
-    const edge = page.locator(".hg-sidebar-edge");
-    const panel = page.locator(".td-shell-sidebar__panel");
+    await expect(restore).toBeFocused();
     await page.waitForTimeout(200);
-    await edge.dispatchEvent("pointerenter", { pointerType: "mouse" });
+    await page.mouse.move(2, 200);
     await expect(page.locator("#td-shell-sidebar")).toHaveClass(
       /td-shell-sidebar--overlay/
     );
     const previewBox = await page.locator(".td-shell-sidebar__panel").boundingBox();
     expect(previewBox.x).toBeLessThanOrEqual(1);
     expect(previewBox.y).toBeLessThanOrEqual(1);
-    await panel.dispatchEvent("pointerenter", { pointerType: "mouse" });
-    await panel.dispatchEvent("pointerleave", { pointerType: "mouse" });
+    await page.mouse.move(900, 300);
     await expect.poll(
       () => page.locator("#td-shell-sidebar").getAttribute("class"),
       { timeout: 1500 }
     ).not.toContain("td-shell-sidebar--overlay");
-    await restore.click();
-    await expect(page.locator("#td-shell-sidebar")).not.toHaveAttribute(
+    await restore.focus();
+    await restore.press("Enter");
+    await expect(page.locator(".td-shell-sidebar__collapse")).toBeFocused();
+    await expect(page.locator(".td-shell-sidebar__panel")).not.toHaveAttribute(
       "aria-hidden", "true"
     );
   });
@@ -54,7 +54,7 @@ for (const locale of ["en", "cn"]) {
     await opener.click();
     await expect(page.locator("html")).toHaveAttribute("data-td-shell-drawer", "open");
     await page.locator("button[data-td-shell-drawer-close]").click();
-    await expect(page.locator("#td-shell-sidebar")).toHaveJSProperty("inert", true);
+    await expect(page.locator(".td-shell-sidebar__panel > *").first()).toHaveJSProperty("inert", true);
     await expect(opener).toBeFocused();
     await expect(page.locator("html")).not.toHaveAttribute("data-td-shell-lock", "");
   });
@@ -63,7 +63,7 @@ for (const locale of ["en", "cn"]) {
 for (const locale of ["en", "cn"]) {
   const prefix = locale === "cn" ? "/cn" : "";
   test(`latest ${locale} docs home opens start and components by default`, async ({ page }) => {
-    const key = `oink.sidebar.v2.latest.${locale}`;
+    const key = `oink.sidebar.v3.latest.${locale}`;
     await page.goto(`${prefix}/docs/`);
     await page.evaluate((name) => localStorage.removeItem(name), key);
     await page.reload();
@@ -86,17 +86,46 @@ for (const locale of ["en", "cn"]) {
   });
 }
 
-test("disabled AI emits no UI or Kapa request", async ({ page }) => {
+for (const route of ["/docs/", "/cn/docs/"]) {
+  test(`disabled AI emits no UI or third-party request at ${route}`, async ({ page }) => {
+    expect(process.env.AI_DISABLED_SITE_ROOT, "Build the AI-disabled fixture").toBeTruthy();
+    const requests = [];
+    page.on("request", (request) => {
+      if (/kapa\.ai|hcaptcha\.com|kapa-widget-proxy/.test(request.url())) {
+        requests.push(request.url());
+      }
+    });
+    await page.goto("http://127.0.0.1:4175" + route);
+    await page.locator("[data-td-shell-search-open]").first().click();
+    await page.locator(".td-shell-search__input").fill("server");
+    await expect(page.locator('[role="option"]').first()).toBeVisible();
+    await expect(page.locator("[data-hg-ask-ai]")).toHaveCount(0);
+    await expect(page.locator('script[src*="kapa-adapter"]')).toHaveCount(0);
+    expect(requests).toEqual([]);
+  });
+}
+
+test("enabled AI makes no third-party request before consent", async ({ page }) => {
   const kapaRequests = [];
   page.on("request", (request) => {
-    if (request.url().includes("kapa.ai")) kapaRequests.push(request.url());
+    if (/kapa\.ai|hcaptcha\.com|kapa-widget-proxy/.test(request.url())) {
+      kapaRequests.push(request.url());
+    }
   });
   await page.goto("/docs/");
   await page.locator("[data-td-shell-search-open]").first().click();
   await page.locator(".td-shell-search__input").fill("server");
   await expect(page.locator('[role="option"]').first()).toBeVisible();
   expect(kapaRequests).toEqual([]);
-  await expect(page.locator("[data-hg-ask-ai]")).toHaveCount(0);
+  await page.locator(".td-shell-search__input").press("Escape");
+  const launcher = page.locator("[data-hg-ask-ai]").first();
+  await expect(launcher).toBeVisible();
+  await launcher.click();
+  await expect(page.locator("[data-hg-ai-consent]")).toBeVisible();
+  await page.locator("[data-hg-ai-cancel]").click();
+  await expect(page.locator("[data-hg-ai-consent]")).not.toBeVisible();
+  await expect(launcher).toBeFocused();
+  expect(kapaRequests).toEqual([]);
 });
 
 test("search index failure keeps one stable, focusable retry control", async ({
