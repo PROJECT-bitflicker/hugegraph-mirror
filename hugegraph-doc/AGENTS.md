@@ -21,6 +21,7 @@ upgrade or deployment workflow. Use `go.mod` / `go.sum` and CI for pinned versio
 ## Project constraints
 
 - Keep English and Chinese documentation aligned when a change applies to both.
+- Wrap new Markdown prose at 160 characters; preserve existing one-line paragraphs and use placeholders for generated IDs.
 - Preserve public routes, historical-version navigation and language switching.
 - Keep HugeGraph branding and behavior in site configuration, data, hooks and
   public OINK APIs. Do not edit the module cache or vendor a theme fork.
