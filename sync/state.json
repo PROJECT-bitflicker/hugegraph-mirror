@@ -1,10 +1,10 @@
 {
-  "last_sync": "2026-10-02T15:30:48Z",
+  "last_sync": "2026-10-02T20:27:50Z",
   "upstreams": {
     "hugegraph": "176fb56dd747ef0f60a126cf721aa12d17627c31",
     "hugegraph-ai": "2e2852531605c6c0381d1783742f29004d2666fc",
     "hugegraph-computer": "04985bbc9907c7b6c9a8fe8833323df049f9bd9b",
     "hugegraph-toolchain": "3b385c3d2f1c04f7fa4b4534b4b1ec220627bfb5",
-    "hugegraph-doc": "3e8d3e33a4e98dd9d2f713ba9ed8ac1fc15ccc7a"
+    "hugegraph-doc": "e6389aa7facd0e5630c498ba8034a3659935b374"
   }
 }
