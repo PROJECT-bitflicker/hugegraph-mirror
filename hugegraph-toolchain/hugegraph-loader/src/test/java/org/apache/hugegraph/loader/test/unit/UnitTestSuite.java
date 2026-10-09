@@ -32,9 +32,13 @@ import org.junit.runners.Suite;
         SparkPartitionWriterTest.class,
         SparkRowTest.class,
         DateUtilTest.class,
+        ParquetUtilTest.class,
         MappingConverterTest.class,
         LoadProgressTest.class,
-        RangesTimerTest.class
+        RangesTimerTest.class,
+        FlinkSinkSerializationTest.class,
+        org.apache.hugegraph.loader.flink.HugeGraphSinkTest.class,
+        org.apache.hugegraph.loader.flink.HugeGraphDeserializationTest.class
 })
 public class UnitTestSuite {
 }
