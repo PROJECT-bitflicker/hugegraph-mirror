@@ -71,6 +71,22 @@ To regenerate Hubble configuration after modifying `.env`:
 ./set-hubble-pd-password.sh hstore      # or hstore-ha
 ```
 
+### Server heap sizing
+
+The Server launcher sizes its default heap from the smaller of host available memory
+and remaining memory under visible cgroup hard limits. It supports cgroup v1/v2,
+ancestor limits and custom controller mounts. Charged inactive file cache is counted
+as reclaimable when controller statistics are available and consistent. The default heap
+uses half that budget, with a 512 MiB minimum and a 32 GiB maximum; startup fails if the budget is below
+512 MiB. Native allocations, thread stacks and file caches also consume container
+memory, so the heap limit does not bound the process's total memory use.
+
+Explicit heap options still take precedence. For example, use `JAVA_OPTS=-Xmx2g`
+for a fixed Server heap in a Docker container, leaving room for other allocations
+within its memory limit. Replacing `JAVA_OPTS` also replaces the image's default
+options; repeat any defaults you need. JVM container-awareness flags cannot reduce
+an explicit `-Xmx` that exceeds the container's limit.
+
 ### Standalone
 
 This is the recommended quickstart.
@@ -241,6 +257,10 @@ shutdown through the launcher using TERM, which shuts down and reaps the JVM; th
 The startup REST check still uses `HG_SERVER_STARTUP_TIMEOUT_S`, and HStore partition checks still
 run after readiness. Shutdown interrupts a stalled readiness probe or pending partition check and
 reaps its polling processes.
+The partition poll and its final `/v1/partitions` diagnostic each have a separate
+`WAIT_PARTITION_TIMEOUT_S` budget (120 seconds by default). If the JVM exits while the
+final diagnostic is stalled, the entrypoint observes its exit after that request finishes
+or reaches this bound; it does not monitor the JVM immediately during the diagnostic.
 A startup timeout requests termination and returns 1 without waiting for an
 unresponsive JVM beyond the startup deadline; container termination cleans up remaining processes.
 Graceful shutdown requires the JVM to respond to TERM; forceful OOM and orchestrator shutdown testing
