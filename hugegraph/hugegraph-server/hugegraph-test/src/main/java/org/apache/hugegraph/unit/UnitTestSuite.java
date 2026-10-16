@@ -18,6 +18,7 @@
 package org.apache.hugegraph.unit;
 
 import org.apache.hugegraph.HugeFactoryTest;
+import org.apache.hugegraph.unit.core.LoadingModeTest;
 import org.apache.hugegraph.GraphDropPendingTest;
 import org.apache.hugegraph.StandardTaskAdmissionTest;
 import org.apache.hugegraph.DistributedTaskAdmissionTest;
@@ -94,6 +95,7 @@ import org.apache.hugegraph.unit.core.RangeTest;
 import org.apache.hugegraph.unit.core.RolePermissionTest;
 import org.apache.hugegraph.unit.core.RowLockTest;
 import org.apache.hugegraph.unit.core.SchemaElementTest;
+import org.apache.hugegraph.unit.core.SchemaTaskSecurityTest;
 import org.apache.hugegraph.unit.core.SecurityManagerTest;
 import org.apache.hugegraph.unit.core.SerialEnumTest;
 import org.apache.hugegraph.unit.core.ServerInfoManagerTest;
@@ -166,6 +168,7 @@ import org.junit.runners.Suite;
         StandardAuthManagerV2Test.class,
         ContextTaskTest.class,
         HugeFactoryTest.class,
+        LoadingModeTest.class,
         GraphDropPendingTest.class,
         StandardTaskAdmissionTest.class,
         DistributedTaskAdmissionTest.class,
@@ -220,6 +223,7 @@ import org.junit.runners.Suite;
         QueryListTest.class,
         RangeTest.class,
         SecurityManagerTest.class,
+        SchemaTaskSecurityTest.class,
         OrderedScanSecurityTest.class,
         RolePermissionTest.class,
         ExceptionTest.class,
