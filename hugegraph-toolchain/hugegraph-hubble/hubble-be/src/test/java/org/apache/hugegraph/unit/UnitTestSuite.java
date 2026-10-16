@@ -46,6 +46,8 @@ import org.junit.runners.Suite;
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
     AccountMutationAuthorizationTest.class,
+    AsyncConfigLifecycleTest.class,
+    AsyncLoadShutdownTest.class,
     AuthContextServiceTest.class,
     AuthModeServiceTest.class,
     AuthSecurityTest.class,
@@ -77,6 +79,7 @@ import org.junit.runners.Suite;
     HubbleOptionsTest.class,
     IngestControllerTest.class,
     IngestTransactionIntegrationTest.class,
+    org.apache.hugegraph.service.load.JobAdmissionIntegrationTest.class,
     LangChainControllerSecurityTest.class,
     LegacyFacadeRemovalTest.class,
     MessageSourceHandlerTest.class,
@@ -87,6 +90,7 @@ import org.junit.runners.Suite;
     JobManagerServiceTest.class,
     K8sTokenEndpointSecurityTest.class,
     LoadTaskServiceTest.class,
+    LoadTaskCheckpointTest.class,
     LoaderScopeControllerTest.class,
     LoginAttemptGuardTest.class,
     OltpAlgoControllerTest.class,
