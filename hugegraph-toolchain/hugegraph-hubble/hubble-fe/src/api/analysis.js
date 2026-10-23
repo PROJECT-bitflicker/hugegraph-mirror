@@ -77,7 +77,7 @@ const executeText2Gql = (graphspace, graph, language, params, config = {}) => {
     }
     return request.post(
         `/graphspaces/${graphspace}/graphs/${graph}/${dialect.endpoint}`,
-        params,
+        {...(typeof params === 'string' ? {content: params} : params), preview: true},
         {...config, suppressBusinessErrorToast: true}
     );
 };
@@ -109,7 +109,7 @@ const putExecutionQuery = (graphspace, graph, params) => {
 
 const getCypherExecutionQuery = (graphspace, graph, params) => {
     return request.get(`/graphspaces/${graphspace}/graphs/${graph}/cypher`, {
-        params,
+        params: {...params, preview: true},
         suppressBusinessErrorToast: true,
     });
 };
@@ -218,6 +218,12 @@ const fetchAsyncTaskResult = (graphspace, graph, taskId) => {
     return request.get(`/graphspaces/${graphspace}/graphs/${graph}/async-tasks/${taskId}`);
 };
 
+const fetchVermeerTaskValues = (graphspace, graph, taskId, cursor) => {
+    return request.get(`/graphspaces/${graphspace}/graphs/${graph}/async-tasks/${taskId}/values`, {
+        params: {cursor, limit: 1000},
+    });
+};
+
 const deleteAsyncTask = (graphspace, graph, selectedTaskIds) => {
     const params  = qs.stringify(selectedTaskIds, {arrayFormat: 'repeat'});
     return request.delete(`/graphspaces/${graphspace}/graphs/${graph}/async-tasks?` + params);
@@ -258,6 +264,7 @@ export {
     runOltpInfo,
     runOlapVermeer,
     fetchAsyncTaskResult,
+    fetchVermeerTaskValues,
     addGraphNode,
     deleteAsyncTask,
     abortAsyncTask,
