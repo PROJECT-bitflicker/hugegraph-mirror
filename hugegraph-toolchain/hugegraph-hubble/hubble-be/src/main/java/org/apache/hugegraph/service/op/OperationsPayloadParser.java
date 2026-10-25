@@ -24,6 +24,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -33,6 +34,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.hugegraph.service.op.OperationsModels.Node;
+import org.apache.hugegraph.service.op.OperationsModels.Readiness;
 import org.apache.hugegraph.service.op.OperationsModels.MetricStatus;
 import org.apache.hugegraph.service.op.OperationsModels.Topology;
 
@@ -42,6 +44,59 @@ public class OperationsPayloadParser {
 
     public OperationsPayloadParser(ObjectMapper mapper) {
         this.mapper = mapper;
+    }
+
+    Readiness parseReadiness(String type, String payload, int httpStatus,
+                              long observedAt, String requestPath) {
+        Map<String, Object> details = Map.of("request_path", requestPath,
+                                           "http_status", httpStatus);
+        try {
+            JsonNode root = this.mapper.readTree(payload);
+            if (root == null || !root.isObject()) {
+                throw new MalformedUpstreamException("readiness");
+            }
+            if (root.path("status").asInt(0) == -1 &&
+                root.path("error").asText("").toLowerCase(Locale.ROOT).contains("unauthorized")) {
+                return new Readiness("UNKNOWN", observedAt, null,
+                                     "readiness_auth_rejected", false, details);
+            }
+            String state;
+            boolean ready;
+            String reason;
+            if ("PD".equals(type)) {
+                JsonNode flag = root.get("ready");
+                state = this.text(root, "state");
+                if (flag == null || !flag.isBoolean() ||
+                    !List.of("STATE_UNINITIALIZED", "STATE_LEADER", "STATE_FOLLOWER",
+                             "STATE_TRANSFERRING", "STATE_CANDIDATE", "STATE_ERROR",
+                             "STATE_SHUTTING", "STATE_SHUTDOWN").contains(state == null ? "" : state)) {
+                    throw new MalformedUpstreamException("readiness");
+                }
+                ready = flag.booleanValue();
+                if (ready && (httpStatus != 200 ||
+                              !List.of("STATE_LEADER", "STATE_FOLLOWER").contains(state))) {
+                    throw new MalformedUpstreamException("readiness");
+                }
+                reason = ready ? null : "STATE_ERROR".equals(state) ? "pd_raft_error" :
+                         "STATE_SHUTDOWN".equals(state) || "STATE_SHUTTING".equals(state) ?
+                         "pd_raft_shutdown" : "pd_quorum_not_ready";
+            } else {
+                JsonNode code = root.get("status");
+                state = this.text(root, "text");
+                if (httpStatus != 200 || code == null || !code.isIntegralNumber() || code.asInt(-1) != 0 ||
+                    !List.of("ONLINE", "STARTING", "STOPPING").contains(state == null ? "" : state)) {
+                    throw new MalformedUpstreamException("readiness");
+                }
+                ready = "ONLINE".equals(state);
+                reason = ready ? null : "STARTING".equals(state) ? "store_starting" : "store_stopping";
+            }
+            return new Readiness(ready ? "READY" : "NOT_READY", observedAt,
+                                 state, reason, false, details);
+        } catch (Exception e) {
+            // Never expose an upstream error envelope or infer readiness from HTTP 200.
+            return new Readiness("UNKNOWN", observedAt, null,
+                                 "readiness_response_unrecognized", false, details);
+        }
     }
 
     public Topology parseTopology(String clusterPayload, String storesPayload) {
@@ -305,16 +360,9 @@ public class OperationsPayloadParser {
         if (configured == null) {
             return null;
         }
-        JsonNode cluster = this.data(clusterPayload, "pd_cluster");
-        List<JsonNode> members = new ArrayList<>();
-        this.requiredArray(cluster, "pdList", "pd_cluster").forEach(members::add);
-        JsonNode leader = cluster.get("pdLeader");
-        if (leader != null && leader.isObject()) {
-            members.add(leader);
-        }
         String scheme = URI.create(configuredBase).getScheme();
         String matchedId = null;
-        for (JsonNode member : members) {
+        for (JsonNode member : this.pdMembers(clusterPayload)) {
             String endpoint = canonicalPdEndpoint(this.text(member, "restUrl"), scheme);
             if (configured.equals(endpoint)) {
                 String id = this.pdId(member);
@@ -325,6 +373,62 @@ public class OperationsPayloadParser {
             }
         }
         return matchedId;
+    }
+
+    Map<String, Object> pdMetricMappingDiagnostics(String clusterPayload, String configuredBase) {
+        String configured = canonicalPdEndpoint(configuredBase, null);
+        String configuredOrigin = endpointOrigin(configured);
+        String scheme = configured == null ? null : URI.create(configured).getScheme();
+        Map<String, Map<String, Object>> members = new LinkedHashMap<>();
+        int matched = 0;
+        for (JsonNode member : this.pdMembers(clusterPayload)) {
+            String id = this.pdId(member);
+            if (id == null || members.containsKey(id)) {
+                continue;
+            }
+            String endpoint = canonicalPdEndpoint(this.text(member, "restUrl"), scheme);
+            String origin = endpointOrigin(endpoint);
+            boolean exact = configured != null && configured.equals(endpoint);
+            if (exact) {
+                matched++;
+            }
+            Map<String, Object> comparison = new LinkedHashMap<>();
+            comparison.put("node_id", id);
+            comparison.put("endpoint_valid", endpoint != null);
+            comparison.put("origin", origin);
+            comparison.put("origin_matches", configuredOrigin != null && configuredOrigin.equals(origin));
+            comparison.put("base_path_matches", configured != null && endpoint != null &&
+                    URI.create(configured).getRawPath().equals(URI.create(endpoint).getRawPath()));
+            members.put(id, comparison);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("configured_origin", configuredOrigin);
+        result.put("status", configured == null ? "invalid_endpoint" : matched > 1 ? "ambiguous" :
+                             matched == 0 ? "no_match" : "matched");
+        result.put("matched_nodes", matched);
+        result.put("discovered_nodes", members.size());
+        result.put("members", members.values().stream()
+                .sorted(Comparator.comparing(member ->
+                        !Boolean.TRUE.equals(member.get("origin_matches")) ||
+                        !Boolean.TRUE.equals(member.get("base_path_matches"))))
+                .limit(10).toList());
+        result.put("omitted_members", Math.max(0, members.size() - 10));
+        return result;
+    }
+
+    private List<JsonNode> pdMembers(String clusterPayload) {
+        JsonNode cluster = this.data(clusterPayload, "pd_cluster");
+        List<JsonNode> members = new ArrayList<>();
+        this.requiredArray(cluster, "pdList", "pd_cluster").forEach(members::add);
+        JsonNode leader = cluster.get("pdLeader");
+        if (leader != null && leader.isObject()) {
+            members.add(leader);
+        }
+        return members;
+    }
+
+    private static String endpointOrigin(String endpoint) {
+        return endpoint == null ? null : OperationsHttpClient.origin(URI.create(endpoint));
     }
 
     private static String canonicalPdEndpoint(String address, String configuredScheme) {

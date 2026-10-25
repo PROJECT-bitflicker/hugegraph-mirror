@@ -34,6 +34,38 @@ public class OperationsPayloadParserTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
+    public void testReadinessRequiresExplicitKnownBodyAndPreservesSafeReasons() throws Exception {
+        OperationsPayloadParser parser = new OperationsPayloadParser(new ObjectMapper());
+        OperationsModels.Readiness ready = parser.parseReadiness("PD",
+                "{\"ready\":true,\"state\":\"STATE_FOLLOWER\",\"isLeader\":false}", 200, 1L, "/probe-prefix/v1/ready");
+        Assert.assertEquals("READY", ready.getStatus());
+        Assert.assertEquals("STATE_FOLLOWER", ready.getState());
+        Assert.assertEquals("/probe-prefix/v1/ready", ready.getDiagnostics().get("request_path"));
+        for (String payload : new String[]{
+                "{}", "[]", "null", "private host=/private-path", "{\"ready\":\"true\"}",
+                "{\"ready\":true,\"state\":\"private-state\"}",
+                "{\"ready\":true,\"state\":\"STATE_ERROR\"}"}) {
+            OperationsModels.Readiness unknown = parser.parseReadiness("PD", payload, 200, 1L, "/probe-prefix/v1/ready");
+            Assert.assertEquals("UNKNOWN", unknown.getStatus());
+            Assert.assertEquals("readiness_response_unrecognized", unknown.getReason());
+            Assert.assertFalse(new ObjectMapper().writeValueAsString(unknown).contains("private"));
+        }
+        OperationsModels.Readiness unauthorized = parser.parseReadiness("PD",
+                "{\"status\":-1,\"error\":\"Unauthorized! private-details\"}", 200, 1L, "/probe-prefix/v1/ready");
+        Assert.assertEquals("UNKNOWN", unauthorized.getStatus());
+        Assert.assertEquals("readiness_auth_rejected", unauthorized.getReason());
+        Assert.assertFalse(new ObjectMapper().writeValueAsString(unauthorized).contains("private"));
+        Assert.assertEquals("UNKNOWN", parser.parseReadiness("PD",
+                "{\"ready\":true,\"state\":\"STATE_LEADER\"}", 503, 1L, "/probe-prefix/v1/ready").getStatus());
+        Assert.assertEquals("pd_quorum_not_ready", parser.parseReadiness("PD",
+                "{\"ready\":false,\"state\":\"STATE_FOLLOWER\"}", 503, 1L, "/probe-prefix/v1/ready").getReason());
+        Assert.assertEquals("NOT_READY", parser.parseReadiness("STORE",
+                "{\"status\":0,\"text\":\"STOPPING\"}", 200, 1L, "/probe-prefix/v1/ready").getStatus());
+        Assert.assertEquals("UNKNOWN", parser.parseReadiness("STORE",
+                "{\"status\":1,\"text\":\"ONLINE\"}", 200, 1L, "/probe-prefix/v1/ready").getStatus());
+    }
+
+    @Test
     public void testParsesPdWrapperAndRedactsInfrastructureFields()
            throws Exception {
         String cluster = "{\"status\":0,\"data\":{" +
@@ -94,6 +126,7 @@ public class OperationsPayloadParserTest {
                 {"https://pd.example:8620", "PD.EXAMPLE:8620"},
                 {"https://pd.example", "pd.example:443"},
                 {"http://[::1]:8620", "[::1]:8620"},
+                {"http://[2001:DB8::1]:8620", "http://[2001:db8::1]:8620/"},
                 {"https://pd.example:8620/pd", "pd.example:8620/pd"}
         };
         for (String[] urls : equivalent) {
@@ -123,6 +156,8 @@ public class OperationsPayloadParserTest {
         Assert.assertNull(parser.pdMetricNodeId(pdCluster("not-a-uri"), "http://pd.example:8620"));
         Assert.assertNull(parser.pdMetricNodeId(pdCluster("pd.example:8620"), "https://pd-alias.example:8620"));
         Assert.assertNull(parser.pdMetricNodeId(pdCluster("http://pd.example:8620"), "https://pd.example:8620"));
+        Assert.assertNull(parser.pdMetricNodeId(pdCluster("http://[::1]:8620"),
+                                               "http://[0:0:0:0:0:0:0:1]:8620"));
     }
 
     private static String pdCluster(String... addresses) {
@@ -131,6 +166,83 @@ public class OperationsPayloadParserTest {
             members.add(Map.of("restUrl", address, "state", "Up"));
         }
         return MAPPER.valueToTree(Map.of("status", 0, "data", Map.of("pdList", members))).toString();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testPdMappingDiagnosticsExplainMismatchWithoutExposingPrivateUrlParts() {
+        OperationsPayloadParser parser = new OperationsPayloadParser(MAPPER);
+        Map<String, Object> result = parser.pdMetricMappingDiagnostics(pdCluster(
+                "http://pd-node:8620/private-base-path",
+                "http://pd-service:8620/different-private-path",
+                "http://private-user:private-password@pd-node:8620/path?token=private-query"),
+                "http://pd-service:8620/private-base-path");
+
+        Assert.assertEquals("no_match", result.get("status"));
+        Assert.assertEquals("http://pd-service:8620", result.get("configured_origin"));
+        Assert.assertEquals(0, result.get("matched_nodes"));
+        Assert.assertEquals(3, result.get("discovered_nodes"));
+        List<Map<String, Object>> members = (List<Map<String, Object>>) result.get("members");
+        Assert.assertEquals(false, members.get(0).get("origin_matches"));
+        Assert.assertEquals(true, members.get(0).get("base_path_matches"));
+        Assert.assertEquals(true, members.get(1).get("origin_matches"));
+        Assert.assertEquals(false, members.get(1).get("base_path_matches"));
+        Assert.assertEquals(false, members.get(2).get("endpoint_valid"));
+        Assert.assertNull(members.get(2).get("origin"));
+        Assert.assertFalse(result.toString().contains("private"));
+        Assert.assertFalse(result.toString().contains("token="));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testPdMappingDiagnosticsReportAmbiguityAndBoundMemberDetails() {
+        OperationsPayloadParser parser = new OperationsPayloadParser(MAPPER);
+        String[] addresses = new String[12];
+        addresses[0] = "http://pd-node:8620";
+        addresses[1] = "HTTP://PD-NODE:8620/";
+        for (int i = 2; i < addresses.length; i++) {
+            addresses[i] = "http://pd-" + i + ":8620";
+        }
+        Map<String, Object> result = parser.pdMetricMappingDiagnostics(pdCluster(addresses), addresses[0]);
+
+        Assert.assertEquals("ambiguous", result.get("status"));
+        Assert.assertEquals(2, result.get("matched_nodes"));
+        Assert.assertEquals(12, result.get("discovered_nodes"));
+        Assert.assertEquals(10, ((List<Map<String, Object>>) result.get("members")).size());
+        Assert.assertEquals(2, result.get("omitted_members"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testPdMappingDiagnosticsRetainTailMatchesBeforeOtherBoundedMembers() {
+        OperationsPayloadParser parser = new OperationsPayloadParser(MAPPER);
+        String[] addresses = new String[12];
+        for (int i = 0; i < 10; i++) {
+            addresses[i] = "http://pd-" + i + ":8620";
+        }
+        addresses[0] = "http://private-user:private-password@pd-0:8620/path?token=private-query";
+        addresses[10] = "http://pd-node:8620/private-base-path";
+        addresses[11] = "HTTP://PD-NODE:8620/private-base-path/";
+        String cluster = pdCluster(addresses);
+        List<Node> discovered = parser.parseTopology(cluster,
+                "{\"status\":0,\"data\":{\"stores\":[]}}").getNodes();
+        Map<String, Object> result = parser.pdMetricMappingDiagnostics(cluster, addresses[10]);
+
+        Assert.assertEquals("ambiguous", result.get("status"));
+        Assert.assertEquals(2, result.get("matched_nodes"));
+        Assert.assertEquals(12, result.get("discovered_nodes"));
+        Assert.assertEquals(2, result.get("omitted_members"));
+        List<Map<String, Object>> members = (List<Map<String, Object>>) result.get("members");
+        Assert.assertEquals(10, members.size());
+        for (int i = 0; i < 2; i++) {
+            Assert.assertEquals(discovered.get(10 + i).getId(), members.get(i).get("node_id"));
+            Assert.assertEquals(true, members.get(i).get("origin_matches"));
+            Assert.assertEquals(true, members.get(i).get("base_path_matches"));
+        }
+        Assert.assertEquals(discovered.get(0).getId(), members.get(2).get("node_id"));
+        Assert.assertEquals(discovered.get(7).getId(), members.get(9).get("node_id"));
+        Assert.assertFalse(result.toString().contains("private"));
+        Assert.assertFalse(result.toString().contains("token="));
     }
 
     @Test

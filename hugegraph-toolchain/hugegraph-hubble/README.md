@@ -9,6 +9,10 @@ graph data load, schema management, graph relationship analysis, and graphical d
 
 ## Graph-space quotas and usage
 
+The [GraphSpace interactions and fixture runner](docs/graphspace-interactions.md)
+guide covers card navigation, editing, failure recovery, pagination and the
+repeatable stateful API fixture.
+
 New graph spaces start with 128 CPU cores, 128 GB memory, 128 compute CPU cores,
 128 GB compute memory, 10240 GB storage and 100 graphs. Server also defaults the
 role limit to 100. Existing spaces retain their configured limits. Large finite
@@ -76,6 +80,7 @@ remain unverified because no live cluster is configured in this test environment
 ## Product Tour
 
 For Hubble and the Go computing engine, see the [Vermeer development environment](docs/vermeer-development.md).
+The [Vermeer-first OLAP guide](docs/vermeer-first-olap.md) covers engine labels, loading, and the optional Computer compatibility path.
 
 ![Vermeer PageRank task results](docs/images/vermeer/async-results.png)
 
@@ -374,6 +379,9 @@ existing Jackson version, without vendor credentials.
 Prepare reusable schemas before configuring data sources and import tasks.
 
 ![Hubble schema template management](docs/images/showcase/schema-templates.jpg)
+
+Schema deletion keeps the selected graph and targets visible, and leaves failed requests
+open for retry or cancellation. See the [schema deletion recovery guide](docs/schema-delete-recovery-20261023.md).
 
 ### Asynchronous Tasks
 
@@ -791,6 +799,25 @@ Then we should follow the [hubble workflow doc](https://hugegraph.apache.org/doc
 
 ## Browser acceptance
 
+The [browser regression guide](docs/browser-regression-guide.md) describes
+fixture checks, diagnostic configuration and live verification boundaries. Keep
+one-time reports and screenshots outside Git, in CI artifacts or PR attachments.
+
+The manual deployment regression runner checks the supported flows against an
+already running frontend. Its API responses are fixtures; it
+does not establish real-cluster acceptance and is separate from the distribution
+gate below. From `hugegraph-hubble`, with frontend dependencies installed:
+
+```bash
+HUBBLE_URL=http://127.0.0.1:3000 \
+HUBBLE_UI_EVIDENCE_DIR=/tmp/hubble-deployment-ui \
+  node hubble-dist/assembly/travis/run_ui_deployment_regressions.js
+```
+
+The output directory contains `browser-report.json` and screenshots; keep it outside
+Git. Each invocation replaces the old report and known runner screenshots,
+including on startup failure; unrelated files are preserved.
+
 Query and algorithm canvases, Schema views and graph-card previews share the G6 5.1.1
 visualization module. The screenshots show a running Hubble and Server with a
 small authenticated test dataset: [query](docs/images/g6/query.png),
@@ -851,6 +878,24 @@ node --test hubble-dist/assembly/travis/ui_auth.test.js \
 python3 hubble-dist/assembly/travis/test_run_live_hubble_smoke.py
 ```
 
+The [Operations diagnostics guide](docs/operations-diagnostics-20261023.md) explains
+collection health, Server/Store request evidence and PD address matching. Run its
+[browser fixture](hubble-dist/assembly/travis/run_ui_operations_diagnostics.js)
+against a running frontend, keeping generated reports and screenshots outside Git:
+
+```bash
+HUBBLE_UI_EVIDENCE_DIR=/tmp/hubble-operations-diagnostics \
+node hubble-dist/assembly/travis/run_ui_operations_diagnostics.js
+```
+
+Set `HUBBLE_URL` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` as needed. The runner uses
+deterministic API fixtures; it does not establish deployment or multi-Server acceptance.
+
+The [service readiness contract](docs/service-readiness-20261023.md) explains
+why registered `UP` nodes can report a service as not ready, the bounded PD/Store
+probes, and the reproducible Chromium checks. Screenshots stay outside Git and
+are linked through the pull request's regression record.
+
 ## Doc
 
 [The hubble homepage](https://hugegraph.apache.org/docs/quickstart/hugegraph-hubble/) contains more information about it.
@@ -882,3 +927,7 @@ cleanup and final status writes; inspect task metadata and Server loading mode b
 ## Graph switching
 
 Query execution waits until the graph context matches the current route, including keyboard shortcuts during a graph switch. Standalone Server 1.5 supports core graph, schema and data operations; GraphSpace management and PD mode require a newer server.
+
+## Query and submitted-task feedback
+
+See [query and submitted-task feedback](docs/query-task-feedback.md) for preview limits, task discovery, and failed-result recovery.

@@ -36,7 +36,12 @@ jest.mock('../algorithm/Home', () => function MockAlgorithmHome() {
     const {isVermeer} = useContext(Context);
     return <div>algorithm module<span>{isVermeer ? 'Vermeer enabled' : 'Vermeer disabled'}</span></div>;
 });
-jest.mock('../asyncTasks/Home', () => () => <div>async module</div>);
+jest.mock('../asyncTasks/Home', () => function MockAsyncTaskHome() {
+    const {useContext} = require('react');
+    const Context = require('../Context').default;
+    const {vermeerReady} = useContext(Context);
+    return <div>async module<span>{vermeerReady ? 'engine known' : 'engine pending'}</span></div>;
+});
 jest.mock('../component/TopBar', () => props => (
     <div>
         <button onClick={() => props.onGraphInfoChange('DEFAULT', {name: 'g'})}>
@@ -104,6 +109,19 @@ it('does not choose an algorithm execution path until Vermeer is known', async (
     }));
 
     expect(await screen.findByText('algorithm module')).toBeInTheDocument();
+});
+
+it('keeps task discovery available while engine-dependent filters await capability discovery', async () => {
+    const capability = deferred();
+    api.auth.getVermeer.mockReturnValue(capability.promise);
+
+    render(<GraphAnalysisHome moduleName='asyncTasks' />);
+    expect(screen.getByText('async module')).toBeVisible();
+    expect(screen.getByText('engine pending')).toBeVisible();
+
+    await act(async () => capability.resolve({status: 200, data: {enable: true}}));
+    expect(screen.getByText('async module')).toBeVisible();
+    expect(screen.getByText('engine known')).toBeVisible();
 });
 
 it('shows the algorithm usage guide beside only the algorithm page title', async () => {
@@ -248,4 +266,13 @@ it('keeps Server tasks visible after a known Vermeer configuration error', async
     expect(screen.getByText('async module')).toBeVisible();
     expect(screen.getByText('analysis.topbar.get_vermeer_failed')).toBeVisible();
     expect(screen.getByRole('button', {name: 'analysis.topbar.retry_vermeer'})).toBeEnabled();
+});
+
+it('shows submitted-task feedback while optional Vermeer discovery is still pending', async () => {
+    const discovery = deferred();
+    api.auth.getVermeer.mockReturnValue(discovery.promise);
+    render(<GraphAnalysisHome moduleName='asyncTasks' />);
+    expect(screen.getByText('async module')).toBeVisible();
+    await act(async () => discovery.resolve({status: 200, data: {enable: false}}));
+    expect(screen.getByText('async module')).toBeVisible();
 });

@@ -230,7 +230,7 @@ const GraphAnalysisHome = props => {
     );
 
     const renderModule = () => {
-        if (moduleName !== GREMLIN && !vermeerReady) {
+        if (moduleName === ALGORITHMS && !vermeerReady) {
             return vermeerLoading ? <Spin /> : null;
         }
         switch (moduleName) {
@@ -246,7 +246,7 @@ const GraphAnalysisHome = props => {
     };
 
     return (
-        <GraphAnalysisContext.Provider value={context}>
+        <GraphAnalysisContext.Provider value={{...context, vermeerReady}}>
             {moduleName !== GREMLIN && <PageHeader
                 className='graphAnalysisHeader'
                 onBack={false}

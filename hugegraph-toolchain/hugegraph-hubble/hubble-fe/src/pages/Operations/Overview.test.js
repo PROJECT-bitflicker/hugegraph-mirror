@@ -181,6 +181,26 @@ test('keeps the current snapshot visible while a refresh is pending', async () =
         .not.toHaveClass('ant-btn-loading'));
 });
 
+test('expires cached node readiness after a failed overview refresh until fresh data arrives', async () => {
+    const ready = {status: 'UP', observed_at: 1000, stale: false, sources: {}, facts: {},
+        nodes: [{id: 'server-ready', name: 'Server ready', type: 'SERVER', status: 'UP',
+            readiness: {status: 'READY', stale: false, observed_at: 1000}}]};
+    let finishRetry;
+    getOverview.mockResolvedValueOnce(ready).mockRejectedValueOnce(new Error('offline'))
+        .mockReturnValueOnce(new Promise(resolve => {finishRetry = resolve;}));
+    renderOverview();
+    expect(await screen.findByLabelText('Service: Ready')).toBeVisible();
+
+    await userEvent.click(screen.getByRole('button', {name: 'Refresh'}));
+    expect(await screen.findByLabelText('Service: Refresh needed')).toBeVisible();
+    expect(screen.queryByLabelText('Service: Ready')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', {name: 'Refresh'}));
+    expect(screen.getByLabelText('Service: Refresh needed')).toBeVisible();
+
+    await act(async () => finishRetry(ready));
+    expect(await screen.findByLabelText('Service: Ready')).toBeVisible();
+});
+
 test('does not restore an older overview after a newer refresh is forbidden', async () => {
     let resolveOlder;
     getOverview
@@ -591,6 +611,22 @@ test('shows failed sources even when discovery returned no nodes', async () => {
         .toBeInTheDocument();
     expect(within(attention).getByText('Upstream unavailable'))
         .toBeInTheDocument();
+});
+
+test('names failed metric groups beside a node that remains online', async () => {
+    getOverview.mockResolvedValue({
+        status: 'DEGRADED', observed_at: 1000, facts: {},
+        sources: {server: {status: 'UP', availability: 'PARTIAL', reason: 'backend_metrics_failed'}},
+        nodes: [{id: 'server-a', name: 'Server A', type: 'SERVER', status: 'UP', metric_statuses: {
+            backend: {availability: 'UNAVAILABLE', reason: 'backend_metrics_failed'},
+        }}],
+    });
+    renderOverview();
+    const attention = await screen.findByRole('region', {name: 'Items needing attention'});
+    expect(within(attention).getByRole('columnheader', {name: 'Failed metric groups'})).toBeVisible();
+    const row = within(attention).getByText('Server A').closest('tr');
+    expect(within(row).getByText('Backend')).toBeVisible();
+    expect(within(row).getByText('UP', {exact: true})).toBeVisible();
 });
 
 test('switches between the topology and an accessible node list', async () => {
