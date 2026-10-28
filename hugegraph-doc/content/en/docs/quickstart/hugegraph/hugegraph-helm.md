@@ -2,7 +2,7 @@
 title: "Deploy HugeGraph with Helm"
 linkTitle: "Helm Deployment"
 weight: 4
-search_keywords: [HugeGraph Helm, Kubernetes, K8s, NodePort, Hubble, OCI, GHCR, Artifact Hub]
+search_keywords: [HugeGraph Helm, Kubernetes, K8s, NodePort, Hubble, OCI, GHCR, Artifact Hub, SeaTunnel Helm]
 ---
 
 This guide covers HugeGraph **1.8.0 and later**, using Helm **3.10+** with OCI support and Kubernetes (K8s) **1.23+**.
@@ -92,7 +92,8 @@ hugegraph-helm/
 
 `mode: easy` is the default. Server and Hubble use automatic NodePorts; PD stays ClusterIP. HTTP works without a domain, certificate or acknowledgement.
 `mode: strict` defaults Server/Hubble to ClusterIP and enables full NetworkPolicy isolation.
-SeaTunnel and Vermeer native Services stay private ClusterIP services and require login in both modes.
+Enabled SeaTunnel and Vermeer native HTTP/UI default to NodePort in easy mode and ClusterIP in strict mode; both require login.
+Internal RPC, Worker HTTP and SeaTunnel member ports remain private.
 Both modes keep authentication and persistence.
 Explicit component parameters take priority over global parameters, which take priority over mode defaults; explicit `false` remains an override.
 The global parameters are `persistence.enabled` and `global.imageRegistry`. Strict mode is also available through `values-strict.yaml`.
@@ -127,33 +128,47 @@ By default, the Chart provisions only the core graph services (PD + Store + Serv
 | Engine | Default | Purpose | Topologies (`*.mode`) | Access & Security |
 |---|---|---|---|---|
 | **Hubble** | Enabled (`true`) | Graph visualization, multi-graphspace management & metrics | Single-replica Deployment | Follows global `mode` (NodePort or ClusterIP) |
-| **SeaTunnel** | Disabled (`false`) | Heterogeneous data ingestion & full graph migration | `standalone` / `cluster` | Private ClusterIP (HTTP Basic auth) |
-| **Vermeer** | Disabled (`false`) | Memory-first high-performance distributed graph algorithms | `standalone` / `cluster` | Private ClusterIP (Token auth, auto-wired to Hubble) |
+| **SeaTunnel** | Disabled (`false`) | Heterogeneous data ingestion & full graph migration | `standalone` / `cluster` | NodePort in easy, ClusterIP in strict; HTTP Basic auth |
+| **Vermeer** | Disabled (`false`) | Memory-first high-performance distributed graph algorithms | `standalone` / `cluster` | NodePort in easy, ClusterIP in strict; Token auth, auto-wired to Hubble |
 
-Enable either engine by setting its `enabled` key to `true` in values. Both engines maintain private ClusterIP services, and their administrative passwords are generated independently from Server.
+Enable either engine by setting its `enabled` key to `true` in values. Their administrator passwords are generated independently from Server.
+For `seatunnel.service.type` and `vermeer.service.type`, `null` inherits the mode default: NodePort in easy mode, ClusterIP in strict mode.
+An explicit `ClusterIP` stays private; an explicit `NodePort`, including in strict mode, exposes authenticated HTTP/UI.
+Clear an older explicit `ClusterIP` override to `null` to inherit easy mode. With `service.nodePort` omitted or `null`, Kubernetes assigns the port.
+The engines' `standalone` / `cluster` topologies are independent of these access settings.
 
 > [!DETAILS]- SeaTunnel: On-demand Data Import, Export, and Migration
 > ```bash
-> helm install hugegraph ./helm/hugegraph -n hugegraph --create-namespace \
->   -f helm/hugegraph/values-single.yaml \
+> helm install hugegraph ./hugegraph-helm -n hugegraph --create-namespace \
+>   -f ./hugegraph-helm/values-single.yaml \
 >   --set seatunnel.enabled=true --set seatunnel.mode=standalone \
 >   --wait --timeout 30m
 > ```
 >
 > - **Topologies**: `standalone` runs 1 Hybrid node for lightweight testing; `cluster` runs multiple homogeneous nodes for high-throughput batch jobs.
-> - **Authentication**: Web dashboard uses independent HTTP Basic auth (default `admin`), stored in the `hugegraph-seatunnel-auth` Secret. Port `5801` is strictly for cluster internal communication.
+> - **Access & Authentication**: In easy mode, open `http://<reachable-node-ip>:<NodePort>/#/overview` using the assigned HTTP NodePort:
+>
+>   ```bash
+>   kubectl -n hugegraph get svc hugegraph-seatunnel \
+>     -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}{"\n"}'
+>   kubectl get nodes -o wide
+>   ```
+>
+>   Log in with HTTP Basic username `admin` and the password from `hugegraph-seatunnel-auth` Secret.
+>   Strict mode defaults to ClusterIP; use `kubectl -n hugegraph port-forward svc/hugegraph-seatunnel 8081:8080` for local access.
+>   Port `5801` remains internal.
 > - See the [SeaTunnel Deployment Section](#6-start-seatunnel) or [SeaTunnel Guide](https://github.com/apache/hugegraph/blob/master/helm/hugegraph/docs/seatunnel.md) for full job configs and migration steps.
 
 > [!DETAILS]- Vermeer: In-Memory Graph Computing Integrated with Hubble
 > ```bash
-> helm install hugegraph ./helm/hugegraph -n hugegraph --create-namespace \
->   -f helm/hugegraph/values-single.yaml \
+> helm install hugegraph ./hugegraph-helm -n hugegraph --create-namespace \
+>   -f ./hugegraph-helm/values-single.yaml \
 >   --set vermeer.enabled=true --set vermeer.mode=standalone \
 >   --wait --timeout 20m
 > ```
 >
 > ```text
-> helm/hugegraph/
+> hugegraph-helm/
 >   examples/
 >     values-vermeer-standalone.yaml # Standalone preset (Master and Worker combined in one Pod)
 >     values-vermeer-cluster.yaml    # Cluster preset (1 dedicated Master Pod + 3 distributed Worker Pods)
@@ -163,8 +178,18 @@ Enable either engine by setting its `enabled` key to `true` in values. Both engi
 >
 > - **Topologies**: `standalone` runs Master and Worker in one Pod; `cluster` provides a separate Master coordinator Pod and scalable Worker computing Pods (default 3 replicas).
 > - **Hubble Integration**: Hubble automatically acquires the internal Master Service URL and service tokens. Operators can trigger 15+ graph algorithms directly from Hubble without manual token configuration.
-> - **Native Dashboard Access**: Forward the private Service via `kubectl -n hugegraph port-forward svc/hugegraph-vermeer-master 6688:6688` and sign in with the password from Secret `<release>-vermeer-admin` under **Admin credential**.
-> - For image pinning and credentials management, see the [Vermeer Deployment Guide](https://github.com/hugegraph/hugegraph/blob/master/helm/hugegraph/docs/vermeer.md).
+> - **Native Dashboard Access**: In easy mode, open `http://<reachable-node-ip>:<NodePort>/` using the Master HTTP NodePort:
+>
+>   ```bash
+>   kubectl -n hugegraph get svc hugegraph-vermeer-master \
+>     -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}{"\n"}'
+>   kubectl get nodes -o wide
+>   ```
+>
+>   Sign in with the password from Secret `<release>-vermeer-admin` under **Admin credential**.
+>   Strict mode defaults to ClusterIP; use `kubectl -n hugegraph port-forward svc/hugegraph-vermeer-master 6688:6688` for local access.
+>   Master/Worker RPC and Worker HTTP remain internal.
+> - For image pinning and credentials management, see the [Vermeer Deployment Guide](https://github.com/apache/hugegraph/blob/e886e9a669cdfd47c9f83392f86fc47940167960/helm/hugegraph/docs/vermeer.md).
 
 ### PD metadata namespace {#metadata-namespace}
 
@@ -287,7 +312,8 @@ Enabled optional engines always require native login, including in easy mode. Ne
 characters in easy mode or 16 in strict mode. SeaTunnel uses HTTP Basic, while Vermeer uses Secret `<release>-vermeer-admin` and its
 **Admin credential** login. Upgrades retain existing passwords, including when changing mode; mode changes do not rotate them automatically.
 Vermeer password sources are `vermeer.auth.admin.password` or `vermeer.auth.admin.existingSecret/key`;
-only Master reads that password. Native administration uses authorized port-forwarding, and Hubble service credentials are automatic.
+only Master reads that password. Access native administration according to the final Service type:
+NodePort connects via the node IP and assigned port, while ClusterIP uses port-forwarding. Hubble service credentials are automatic.
 
 > [!DETAILS]- Advanced: Vermeer deployment credentials and GitOps
 > For GitOps, preserve stable administrator credentials and the separate internal service identity.
@@ -365,3 +391,116 @@ A contradictory budget fails rendering with the relevant parameter names. Storag
 The default `helm test` hook checks connectivity and reads. After installation or recovery, also test a new UI login and your application's
 read/write queries.
 For scheduling, NetworkPolicy, rolling updates and recovery, see [Kubernetes operations](./hugegraph-helm-operations.md).
+
+## 6 Deploy and Use SeaTunnel (Optional Engine) {#6-start-seatunnel}
+
+SeaTunnel is an optional data integration engine supported by HugeGraph, disabled by default. When enabled, Helm provisions a persistent SeaTunnel Zeta engine alongside a task Web dashboard within the same release.
+The official `apache/seatunnel:3.0.0` image comes with built-in HugeGraph connectors (Source and Sink), requiring no custom image builds or plugin installation.
+
+```text
+helm/hugegraph/
+  examples/
+    values-seatunnel-standalone.yaml # Standalone preset (1 Hybrid node, lightweight for local/dev use)
+    values-seatunnel-cluster.yaml    # Cluster preset (multiple Hybrid nodes for distributed parallelism)
+    seatunnel/
+      hugegraph-sink.conf            # Import sample: batch inserts test vertices into HugeGraph
+      hugegraph-source.conf          # Export sample: reads graph data from HugeGraph to stdout/logs
+      clone/                         # Full graph migration configs
+        copy-schema.py               # Automated Schema synchronization script
+        person.conf / knows.conf     # Per-label vertex and edge migration job definitions
+```
+
+```mermaid
+flowchart TB
+    A["External Data Source / Remote Graph"] --> ST
+    subgraph Release["Same Helm Release"]
+        ST["SeaTunnel Zeta<br/>Hybrid Node"] -->|Read / Write| HG["HugeGraph<br/>Server + PD + Store"]
+    end
+    U["Operators"] -->|Web UI / REST (HTTP Basic)| ST
+```
+
+### 6.1 Choose Standalone or Cluster Mode
+
+SeaTunnel uses a Hybrid node architecture where each node handles both job scheduling and execution:
+- **Standalone Mode**: Starts 1 persistent node, minimizing memory footprint for development and lightweight jobs.
+- **Cluster Mode**: Starts multiple uniform nodes forming a cluster for distributed high availability and higher throughput.
+
+SeaTunnel scaling is fully decoupled from the HugeGraph cluster topology. Install from the extracted chart directory or repository root by combining presets:
+
+```bash {tab="SeaTunnel Standalone"}
+helm install hugegraph ./hugegraph-helm -n hugegraph --create-namespace \
+  -f ./hugegraph-helm/values-single.yaml \
+  -f ./hugegraph-helm/examples/values-seatunnel-standalone.yaml \
+  --wait --timeout 30m
+```
+
+```bash {tab="SeaTunnel Cluster"}
+helm install hugegraph ./hugegraph-helm -n hugegraph --create-namespace \
+  -f ./hugegraph-helm/values-single.yaml \
+  -f ./hugegraph-helm/examples/values-seatunnel-cluster.yaml \
+  --wait --timeout 30m
+```
+
+> [!TIP]
+> To add SeaTunnel to an existing HugeGraph deployment, simply set `seatunnel.enabled: true` with the chosen topology values and run `helm upgrade`. Existing graph services remain uninterrupted. Because the SeaTunnel image is large, mirror it to your private registry beforehand in air-gapped environments.
+
+### 6.2 Access Web UI and Authentication
+
+SeaTunnel inherits the global `mode` setting when `seatunnel.service.type: null`: easy defaults to NodePort, strict to ClusterIP.
+An explicit `ClusterIP` stays private; explicit `NodePort`, including in strict mode, exposes HTTP/UI with the same required login.
+Clear an older explicit `ClusterIP` override to `null` to inherit easy mode. Omit `seatunnel.service.nodePort` or use `null` for automatic allocation.
+The `standalone` / `cluster` topology does not change this access choice:
+
+```bash {tab="NodePort (easy mode)"}
+kubectl -n hugegraph get svc hugegraph-seatunnel \
+  -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}{"\n"}'
+kubectl get nodes -o wide
+# Open browser: http://<NodeIP>:<NodePort>/#/overview
+```
+
+```bash {tab="Port-forward (General)"}
+kubectl -n hugegraph port-forward svc/hugegraph-seatunnel 8081:8080
+# Open locally: http://127.0.0.1:8081/#/overview
+```
+
+The Web dashboard and REST APIs require independent HTTP Basic authentication in both modes, distinct from HugeGraph Server credentials.
+The username is `admin`; newly generated passwords use 6 random alphanumeric characters in easy mode or 16 in strict mode.
+Upgrades and mode changes retain the existing password. Read it from the release Secret:
+
+```bash
+kubectl -n hugegraph get secret hugegraph-seatunnel-auth \
+  -o jsonpath='{.data.password}' | base64 --decode
+```
+
+> [!WARNING]
+> Port `5801` is reserved for internal Zeta communication and CLI commands; it does not use HTTP Basic auth and remains private.
+> External access uses only the authenticated HTTP Service through its assigned NodePort; the application still listens on `8080`.
+
+### 6.3 Run Pre-configured Example Jobs
+
+The Chart mounts sample jobs inside the SeaTunnel Pod, pre-configured with environment variables referencing the in-release Server address, graph name, and credentials:
+
+1. **Prepare Graph**: Ensure an empty target graph exists via Hubble or REST API (default `DEFAULT/graph_a`).
+2. **Run Import Job**: Ingest 10 sample vertices under the `seatunnel_demo_person` label:
+
+   ```bash
+   kubectl -n hugegraph exec sts/hugegraph-seatunnel -- \
+     /opt/seatunnel/bin/seatunnel.sh --master cluster \
+     --config /opt/seatunnel/config/hugegraph-sink.conf
+   ```
+
+3. **Verify with Export Job**: Run the Source sample job to read back the same vertices and print them to standard logs:
+
+   ```bash
+   kubectl -n hugegraph exec sts/hugegraph-seatunnel -- \
+     /opt/seatunnel/bin/seatunnel.sh --master cluster \
+     --config /opt/seatunnel/config/hugegraph-source.conf
+   ```
+{.steps}
+
+Inspect job status and DAG progress in real time on the Web dashboard. To use custom graphs or credentials, override environment variables under `seatunnel.env` or mount external configurations via `seatunnel.config`.
+
+### 6.4 Full Migration and Topology Switches
+
+- **Topology Switch**: Switch between standalone and cluster modes by updating values and running `helm upgrade`. Since the engine process restarts, complete all running batch jobs before switching.
+- **Full Graph Migration**: Follow the sequence **Schema metadata → Vertices → Edges**. See `examples/seatunnel/clone/` for automated migration scripts and configs. When migrating fields with `DATE` types, explicitly specify matching server timezones (e.g. `timeZone = "UTC"`) in the Sink config to prevent timezone shift. See the [SeaTunnel Source migration guide](/docs/quickstart/toolchain/export-migration/hugegraph-seatunnel-source/) for details.
