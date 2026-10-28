@@ -5,10 +5,13 @@
 
 `hugegraph-ai` integrates [HugeGraph](https://github.com/apache/hugegraph) with artificial intelligence capabilities, providing comprehensive support for developers to build AI-powered graph applications.
 
+Contributor workflows: [CI selection and full validation](docs/quality/ci.md), [release preparation](docs/releasing.md).
+
 ## ✨ Key Features
 
 - **[LLM/GraphRAG](./hugegraph-llm/README.md#graphrag)**: Build intelligent question-answering systems with graph-enhanced retrieval
 - **[Knowledge Graph Construction](./hugegraph-llm/README.md#knowledge-graph-construction)**: Automated graph building from text using LLMs
+- **[HugeGraph-LLM SDK](./hugegraph-llm-sdk/README.md)**: Design schemas and extract reviewed property graphs in your own Python project, without a UI or database service
 - **[Graph ML](./hugegraph-ml/README.md)**: Integration with 20+ graph learning algorithms (GCN, GAT, GraphSAGE, etc.)
 - **[HG-Python Client](./hugegraph-python-client/README.md)**: Easy-to-use Python interface for HugeGraph operations
 - **[Vermeer Python Client](./vermeer-python-client/README.md)**: SDK/Interface for Graph Computing with [Vermeer](https://github.com/apache/hugegraph-computer/tree/master/vermeer#readme)
@@ -20,7 +23,7 @@
 
 ### Prerequisites
 
-- Python 3.10+ (required for hugegraph-llm)
+- Python 3.11 for hugegraph-llm (`>=3.11,<3.12`; Python 3.12 is not supported by the application)
 - [uv](https://docs.astral.sh/uv/) 0.7+ (required for workspace management)
 - HugeGraph Server 1.3+ for the LLM/client modules (1.5+ recommended); `hugegraph-mcp` requires 1.7.0+
 - Docker (optional, for containerized deployment)
@@ -97,6 +100,15 @@ python examples/your_ml_example.py
 
 ## 📦 Modules
 
+### [hugegraph-llm-sdk](./hugegraph-llm-sdk)
+
+HugeGraph-LLM SDK is an independently installable Python interface for reusable LLM capabilities. Its current
+scope is schema design, validation, and reviewed property-graph extraction. Inject your own model or install an
+optional provider adapter; synchronous and asynchronous APIs share the same graph rules. The SDK and application
+are sibling packages: `hugegraph-llm` depends on `hugegraph-llm-sdk`, while external projects can install the SDK
+alone. See its [integration guide](./hugegraph-llm-sdk/README.md) for source installation and offline examples,
+and [architecture](./docs/sdk/architecture.md) for module responsibilities and extension boundaries.
+
 ### [hugegraph-llm](./hugegraph-llm) [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-blue)](https://deepwiki.com/apache/hugegraph-ai)
 
 Large language model integration for graph applications:
@@ -112,7 +124,7 @@ Model Context Protocol server for safe, controlled HugeGraph access:
 
 - **Stable Tool Contract**: Typed graph, schema, Gremlin, and extraction tools for MCP clients
 - **Safe Writes**: Read-only defaults plus dry-run, persistent single-use confirmation, and target revalidation
-- **Compatibility**: Default `core` toolset with an opt-in `legacy` compatibility mode in this checkout; published `1.7.1` uses `v2_core` / `v1`
+- **Compatibility**: Default `core` toolset with an opt-in `legacy` compatibility mode; the previous `1.7.1` release uses `v2_core` / `v1`
 
 ### [hugegraph-ml](./hugegraph-ml)
 
@@ -195,17 +207,21 @@ uv add numpy  # Add to base dependencies
 uv add --group dev pytest-mock  # Add to dev group
 ```
 
-### Code Quality (ruff + pre-commit)
+### Code Quality (uv + Ruff + ty)
 
-- Ruff is used for linting and formatting:
-  - \`ruff format .\`
-  - \`ruff check .\`
-- Enable Git hooks via pre-commit:
-  - \`pre-commit install\`
-  - \`pre-commit run --all-files\`
-- Config: [.pre-commit-config.yaml](.pre-commit-config.yaml). CI enforces these checks.
-  **Key Points:**
-- Config: [.pre-commit-config.yaml](.pre-commit-config.yaml). CI enforces these checks.
+From the repository root:
+
+```bash
+uv run --extra dev ruff format --check .
+uv run --extra dev ruff check .
+uv run --extra dev ty check hugegraph-llm/src/hugegraph_llm hugegraph-python-client/src/pyhugegraph
+```
+
+Ruff and ty use `>=` requirements in root `pyproject.toml`.
+The [pre-commit hooks](.pre-commit-config.yaml) run Ruff through uv and inherit that range.
+Enable hooks with `uv run --extra dev pre-commit install`. CI runs Ruff and affected-module ty
+checks in existing runners; application type checks remain advisory while the
+existing diagnostic baseline is resolved. See [CI policy](docs/quality/ci.md).
 
 **Key Points:**
 - Use [GitHub Desktop](https://desktop.github.com/) for easier PR management

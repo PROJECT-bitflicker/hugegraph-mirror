@@ -16,6 +16,7 @@
 # under the License.
 
 [project]
+# Release version is synchronized by scripts/version.py from the root pyproject.toml.
 name = "hugegraph-llm"
 version = "1.8.0"
 description = "A tool for the implementation and research related to large language models."
@@ -27,8 +28,9 @@ maintainers = [
 ]
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.11,<3.12"
 dependencies = [
+    "hugegraph-llm-sdk==1.8.0",
     # Common dependencies
     "decorator",
     "requests",
@@ -97,6 +99,7 @@ include = [
 allow-direct-references = true
 
 [tool.uv.sources]
+hugegraph-llm-sdk = { workspace = true }
 hugegraph-python = { workspace = true }
 pycgraph = { git = "https://github.com/ChunelFeng/CGraph.git", subdirectory = "python", tag = "v3.2.2", marker = "platform_machine == 'aarch64'" }
 
