@@ -452,14 +452,24 @@ Vermeer exposes a REST API on port `6688` (configurable in `master.ini`).
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/v1/graphs` | POST | Load graph from data source |
-| `/api/v1/graphs/{graph_id}` | GET | Get graph metadata |
-| `/api/v1/graphs/{graph_id}` | DELETE | Unload graph from memory |
-| `/api/v1/compute` | POST | Execute algorithm on loaded graph |
-| `/api/v1/tasks/{task_id}` | GET | Get task status and results |
+| `/api/v1/graphs` | GET | List graphs visible to the caller |
+| `/api/v1/graphs/{graph_name}` | GET | Get graph metadata |
+| `/api/v1/graphs/{graph_name}` | DELETE | Unload the graph |
+| `/api/v1/tasks` | GET | List tasks; POST returns 405 |
+| `/api/v1/tasks/create` | POST | Submit a load, reload or compute task |
+| `/api/v1/tasks/create/sync` | POST | Submit and wait for a task |
+| `/api/v1/task/{task_id}` | GET | Get task status |
+| `/api/v1/tasks/value/{task_id}` | GET | Query retained compute results |
 | `/api/v1/workers` | GET | List connected workers |
-| `/api/v1/workers/availability` | GET | Read worker readiness for the authenticated space |
+| `/api/v1/workers/availability` | GET | Read readiness for the authenticated space |
 | `/` | GET | Web UI dashboard |
+
+Task collection POST previously returned a success-shaped response without creating
+anything. It now returns HTTP 405, `Allow: GET` and a nonzero `errcode` pointing to
+`/api/v1/tasks/create`. The legacy `/tasks` route has the same behavior.
+Do not treat an arbitrary HTTP 200 as proof of submission: successful creation
+returns a `task` object with an `id`, which must then reach a terminal state.
+The native API paths and IDs differ from Hubble's `/api/v1.3` routes and negative task IDs.
 
 Worker availability uses the normal space credential and returns only
 `{"available":true|false}` for that authenticated space's allocations or the
@@ -480,38 +490,55 @@ cooperative cancellation behavior.
 
 ### Example: Run PageRank
 
+Use a service token with access to the graph's space. HugeGraph bulk loading under
+`auth=token` requires an administrator credential; the native UI password is not a
+Bearer token. Ensure PD/Store addresses are reachable and match the metadata namespace.
+
 ```bash
-# 1. Load graph from HugeGraph
-curl -X POST http://localhost:6688/api/v1/graphs \
-  -H "Content-Type: application/json" \
+# 1. Submit a load task. This creates the Vermeer graph copy.
+curl -X POST http://localhost:6688/api/v1/tasks/create \
+  -H "Authorization: Bearer $VERMEER_TOKEN" \
+  -H 'Content-Type: application/json' \
   -d '{
-    "graph_name": "my_graph",
-    "load_type": "hugegraph",
-    "hugegraph": {
-      "pd_peers": ["127.0.0.1:8686"],
-      "graph_name": "hugegraph"
-    }
-  }'
-
-# 2. Run PageRank
-curl -X POST http://localhost:6688/api/v1/compute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "graph_name": "my_graph",
-    "algorithm": "pagerank",
+    "graph": "my_graph",
+    "task_type": "load",
     "params": {
-      "max_iterations": 20,
-      "damping_factor": 0.85
-    },
-    "output": {
-      "type": "hugegraph",
-      "property_name": "pagerank_value"
+      "load.type": "hugegraph",
+      "load.hg_pd_peers": "[\"127.0.0.1:8686\"]",
+      "load.hugegraph_name": "DEFAULT/hugegraph/g"
     }
   }'
 
-# 3. Check task status
-curl http://localhost:6688/api/v1/tasks/{task_id}
+# 2. Poll the returned task.id; continue after successful loading.
+curl -H "Authorization: Bearer $VERMEER_TOKEN" \
+  http://localhost:6688/api/v1/task/123
+
+# 3. Submit a computation against the loaded copy.
+curl -X POST http://localhost:6688/api/v1/tasks/create \
+  -H "Authorization: Bearer $VERMEER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "graph": "my_graph",
+    "task_type": "compute",
+    "params": {
+      "compute.algorithm": "pagerank",
+      "compute.parallel": "1",
+      "compute.max_step": "20",
+      "pagerank.damping": "0.85",
+      "pagerank.diff_threshold": "0.00001",
+      "output.type": "local",
+      "output.file_path": "./data/pagerank-example",
+      "output.need_query": "1"
+    }
+  }'
 ```
+
+Replace `123` with the actual positive native task ID. The load task succeeding or
+the graph becoming `loaded` does not mean the computation has finished. Poll the
+computation's own ID; read results through `/api/v1/tasks/value/{task_id}` only after
+success. `params` is a flat string-to-string map. `algorithm`, `max_iterations` and
+`damping_factor` at the old example locations are not this API's request model.
+The configured output path is on the Vermeer workers, not the HTTP client's machine.
 
 ### OLAP vs OLTP Modes
 
@@ -528,19 +555,11 @@ Vermeer integrates with HugeGraph via:
 2. **Data Loading**: Streams vertices/edges from HugeGraph Store via gRPC (`ScanPartition`)
 3. **Result Writing**: Writes computed results back via HugeGraph REST API (adds vertex properties)
 
-Configuration in graph load request:
-
-```json
-{
-  "load_type": "hugegraph",
-  "hugegraph": {
-    "pd_peers": ["127.0.0.1:8686"],
-    "graph_name": "hugegraph",
-    "vertex_label": "person",
-    "edge_label": "knows"
-  }
-}
-```
+In the task request above, `load.hg_pd_peers` is a JSON array encoded as a string,
+and `load.hugegraph_name` uses `<graphspace>/<graph>/g`. Pass these keys inside the
+flat `params` map with `task_type: "load"`, not a nested `hugegraph` object.
+The Server/Store metadata prefix and credentials must follow the deployment guide.
+The current HugeGraph loader does not subdivide each Store partition using `load.parallel`; omit that option here.
 
 ### Local CSV Files
 
@@ -684,11 +703,45 @@ vermeer/tools/protoc/linux64/protoc vermeer/apps/protos/*.proto --go-grpc_out=ve
 
 ### Algorithm-Specific
 
-- **PageRank**: Use `damping_factor=0.85`, `tolerance=0.0001` for faster convergence
+- **PageRank**: Use `pagerank.damping=0.85`; tune `pagerank.diff_threshold` (for example, `0.0001`) to control convergence.
 - **Louvain**: Enable `weighted=true` only if edge weights are meaningful
 - **SSSP**: Provide source vertex ID for single-source queries
 
 ## Monitoring
+
+### Cluster health snapshot
+
+`GET /api/v1/admin/cluster` returns a read-only, versioned snapshot for Hubble's
+operations overview. In token-authenticated deployments it requires an admin
+token; it uses the same authentication filters as the other `/admin` APIs.
+
+The response includes `schema_version: 1`, `observed_at` (Unix milliseconds),
+Master and Worker details, `registered_workers`, and `ready_workers`.
+Registration alone is not readiness: each Worker needs a ready reverse gRPC
+connection and live load, compute, and superstep streams. No Workers, or a
+registered Worker missing a readiness check, yields `DEGRADED` with a reason.
+Removed Workers are not fabricated as offline nodes, and the registered count
+is not a Kubernetes desired replica count.
+
+Each node reports resource collection separately in `metric_status`.
+`metrics.cpu_cores` is consumed process CPU seconds per elapsed wall second;
+`metrics.rss_bytes` is resident process memory, not host or Pod utilization.
+The first sample can report `metrics_warming_up`; subsequent observations
+include `sample_window_seconds`. Resource collection failure never changes
+Worker readiness, and unsupported older Workers return an explicit unsupported
+metric status. Resource RPCs share a bounded deadline and run outside the Worker
+manager lock.
+
+`GET /api/v1/workers/availability` implements the accompanying Helm availability
+hook's space-scoped check. It returns only `{"available": true|false}` for the
+authenticated credential's space, following the existing allocation
+rules: an accessible common, space, or graph Worker group must contain at least
+one Worker and every registered member must pass all readiness checks. A Worker
+registered in another group's scope does not make this check succeed. This
+endpoint describes space task availability, rather than overall cluster health.
+
+Build and deploy matching Vermeer and Hubble images together to use the new
+cluster-health contract.
 
 Access the Web UI dashboard at `http://master-ip:6688/` for:
 
