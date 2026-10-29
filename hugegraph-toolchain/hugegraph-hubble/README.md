@@ -404,6 +404,37 @@ Track asynchronous queries and algorithms, then expand compact results inline.
 
 ![Hubble asynchronous task results](docs/images/showcase/async-tasks.jpg)
 
+### Cluster Operations and Vermeer
+
+The cluster overview keeps Server, PD, and Store topology as the main view.
+When Vermeer monitoring is enabled, a compact compute-cluster summary appears beside the Store row,
+with no Store-to-Vermeer connector or additional topology layer. Open it to inspect
+the Master layer above the Worker layer, then return to the main cluster without
+losing the selected topology or node-list view. Worker nodes wrap within the
+same layer as the deployment grows. Node details distinguish readiness checks
+from process CPU and RSS telemetry; the compute summary reports collection
+coverage rather than treating partial samples as a cluster total. Missing or stale
+observations do not imply that a registered node is ready.
+
+These browser captures use controlled API fixtures for the 1 Master + 1 Worker
+and 1 Master + 10 Worker scenarios. They illustrate the implemented interface,
+not the health of a live Helm deployment.
+
+![Main cluster overview with a compact Vermeer summary](docs/images/showcase/operations-vermeer-overview.png)
+
+![Vermeer compute perspective with Master above Worker](docs/images/showcase/operations-vermeer-compute.png)
+
+![Vermeer Worker nodes wrap within the same layer](docs/images/showcase/operations-vermeer-many-workers.png)
+
+Stale evidence retains node identity while current readiness remains unconfirmed:
+[last successful observation](docs/images/showcase/operations-vermeer-stale-history.png)
+and [English node details](docs/images/showcase/operations-vermeer-stale-en.png).
+An [installation without Vermeer monitoring](docs/images/showcase/operations-vermeer-disabled.png)
+keeps the main topology free of an unused compute entry.
+
+See [Vermeer operations integration](docs/operations-vermeer.md) for deployment
+configuration, state semantics, permissions, and the coordinated image rollout.
+
 ## Authentication, connections, and compatibility
 
 Hubble uses one capability-driven connection boundary for `1.8/master`. Authentication mode is detected from the connected HugeGraph Server; Hubble does not maintain a separate authentication switch. Account and permission entry points are hidden when Server allows anonymous access. Connection switching always goes through the backend resolver. In PD mode, a valid server address returned by discovery is sufficient; a manually configured server URL is not required.
@@ -419,6 +450,65 @@ The compatibility boundary is deliberately small:
 | Server, PD, and Store 1.8.x or later | Distributed deployment recommended | Full and recommended experience | Current GraphSpace, account permission presets, cluster operations, async tasks, and algorithm capability handling are designed and validated against this generation. |
 
 Use matching Server, PD, and Store minor versions in a distributed cluster. **Server/PD 1.8 or later is strongly recommended for the best Hubble experience.** Support for 1.5 and 1.7 is intentionally limited to minimum usability and does not imply feature parity with the current release. Version checks stay in the client adapter/resolver rather than being scattered through controllers or pages. See [`AGENTS.md`](AGENTS.md) for verification rules.
+
+### Personal session timeout
+
+The personal center uses the current authentication context to display the account
+role, including GraphSpace administrators. The session panel reads the deployed
+servlet idle timeout (48 hours by default) and lets signed-in users change their
+current browser session within the administrator-defined range. The backend
+validates this range and requires the existing username/token session; anonymous deployments expose no
+personal center or session settings.
+
+Administrators configure `hubble.session.max-idle-seconds` in the backend Spring
+configuration (or `HUBBLE_SESSION_MAX_IDLE_SECONDS` in the environment). `0`, the
+default, inherits the original `server.servlet.session.timeout` as the personal
+ceiling. A positive value explicitly authorizes that ceiling in seconds, including
+values above seven days. Personal changes never alter this ceiling. The initial
+timeout and subsequent sign-ins are also capped by it. For example, a 48-hour
+servlet default with a 2-hour ceiling starts at 2 hours and offers 1–2 hours in the UI.
+Personal edits use whole hours, starting at 1 hour; the API still uses seconds.
+Non-whole-hour deployment values remain unchanged and display as “Deployment value”
+until the user explicitly selects an allowed hour value. A ceiling below one hour
+leaves no editable whole-hour choice. The compact panel keeps its brief help and
+allowed range in a tooltip.
+A positive deployment default below 15 minutes, or a ceiling below 15 minutes,
+keeps its effective timeout and makes personal editing unavailable. An unlimited
+servlet default with no explicit ceiling stays unlimited and read-only; configure
+a positive ceiling to enable bounded personal choices.
+
+An application-wide timer tracks mouse, keyboard and touch activity across tabs
+sharing the same login. Background requests do not extend this timer. Changing
+the setting applies immediately, and an expired timer calls the existing logout
+endpoint before clearing local account state (with a five-second local fallback
+if logout stalls). Anonymous mode never creates a session for this timer.
+The servlet request-idle timeout is also updated, but the two clocks are independent:
+mouse or keyboard input without an HTTP request does not renew the servlet clock,
+while background requests can renew the servlet session without extending the browser
+timer. Either clock can end the login; an actively edited static page can therefore
+lose its server session earlier. No human-activity heartbeat is sent to the server.
+Signing in again restores the
+original deployment timeout and starts a fresh, noncredential activity scope.
+Idle logout includes that expected scope: a stale tab can clear its own local
+state without revoking a newer login sharing the browser's session cookie.
+Explicit user-initiated logout continues to clear the current login.
+This does not change the password lifetime or renew the HugeGraph token
+(currently issued for 30 days).
+
+The Chrome screenshot uses explicit API fixtures. The interaction check covers
+GraphSpace administrator display while legacy status says `USER`, saving 1 hour
+as 3600 seconds, changing identity to a regular user, changing the connection mode
+to standalone admin, and anonymous account-page hiding; it is not live cluster or
+long-duration expiry acceptance. In a separate controlled-API App check,
+Playwright's browser clock advanced beyond a 15-minute timeout while background
+authorization refreshes continued to succeed; the existing logout endpoint ran
+and the app returned to login. Changing 15 to 30 minutes kept the session alive
+after the old deadline and logged it out after the updated deadline. These are
+simulated-time checks, not a 15/30-minute live-cluster soak. A second shared-login
+tab receiving keyboard input also kept both tabs alive beyond their original
+15-minute deadlines while background authorization requests remained successful.
+
+![Personal role and session idle setting](docs/assets/personal-session-idle.png)
 
 ## Import resource cleanup
 
@@ -620,6 +710,35 @@ points appeared only in authenticated mode. These fixtures do not validate live
 Server/PD/Store connectivity, authentication enforcement, or the connection
 resolver. Screenshots: [PD data health in anonymous mode](docs/assets/operations-pd-data-health-anonymous.png)
 and [Server backend health after administrator login](docs/assets/operations-server-backend-health-authenticated.png).
+
+### Vermeer backend configuration
+
+Enable deployment-wide Vermeer monitoring independently of the selected graph.
+Hubble reads `GET /api/v1/admin/cluster` using an internal Master HTTP origin and
+an administrator token file; browsers receive neither the credential nor Worker
+request targets:
+
+```properties
+operations.vermeer.enabled=true
+operations.vermeer.address=http://vermeer-master:6688
+operations.vermeer.token_file=/var/run/hugegraph/vermeer/token
+```
+
+The paired Helm chart supplies the Service address and read-only, memory-backed
+token mount. For other deployments, mount the token read-only and rotate it
+before expiry. Hubble rereads it and invalidates old observations on rotation;
+401/403 responses also discard retained node data. Collection is disabled by
+default and remains neutral to the main cluster's health.
+
+`GET /api/v1.3/operations/overview` adds `vermeer`, `main_cluster_status` and
+`main_cluster_reason`, retaining the original graph `nodes` and `facts`.
+The existing Operations health, topology and metrics capabilities also govern
+this source; resource data is omitted without metrics access.
+
+See [Cluster Operations and Vermeer](#cluster-operations-and-vermeer) for the UI
+and [Vermeer operations integration](docs/operations-vermeer.md) for the separate
+administrator settings, readiness/registration and resource semantics, cache
+behavior, HTTP limits and paired image rollout.
 
 ## Functional Modules Overview
 
@@ -988,3 +1107,26 @@ These Chromium screenshots use intercepted APIs in authenticated administrator
 mode. Anonymous PD access, GraphSpace switching and account visibility were also
 checked. They validate the UI contract; native count correctness and retention
 policies require separate live deployment verification.
+
+### OLTP and OLAP algorithm workflows
+
+The catalog separates **OLTP Subgraph Queries** and **OLAP Whole-graph Compute**.
+The sidebar keeps the algorithm list compact, with help beside each algorithm
+name. Setup and loading guidance appears in the idle canvas, with a compact
+status row when results are already visible. When graph compute is unavailable,
+the canvas offers a recheck and links to Vermeer documentation and the Helm startup
+guide. OLTP remains usable while compute discovery is pending or has failed;
+OLAP offers a backend only after discovery is confirmed. Load a graph for Vermeer
+from the OLAP tab, then inspect progress and results in async tasks.
+Changing the UI language retains graph results and submitted task IDs.
+
+![OLTP query result and compact algorithm help](docs/assets/analytics/oltp-query-result.png)
+
+![OLAP loading guidance](docs/assets/analytics/olap-load-guide.png)
+
+![Unavailable graph compute with documentation and recheck](docs/assets/analytics/olap-unavailable.png)
+
+These screenshots come from a Chromium run with explicitly intercepted APIs in
+authenticated administrator mode. The corresponding anonymous PD flow, loading
+submission scope and GraphSpace switching were also checked. They demonstrate UI
+navigation and feedback; it does not establish live loading or algorithm results.
