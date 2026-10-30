@@ -1,7 +1,7 @@
 {
-  "last_sync": "2026-10-29T21:38:28Z",
+  "last_sync": "2026-10-30T20:31:22Z",
   "upstreams": {
-    "hugegraph": "29333a6ec51adbf4f2b4bd83a32c45e212f0475c",
+    "hugegraph": "bd3ab5648612fde5b6e201535bd838aa726f7a97",
     "hugegraph-ai": "f85393030be2605899e26165b3c0873c368e2425",
     "hugegraph-computer": "3a8d988c55ac0c6187455914639c4413f0b304fc",
     "hugegraph-toolchain": "2f8d01b267fcec61543617fcc94853f9d0fb5b5c",
