@@ -32,9 +32,9 @@ import {
     RefreshButton,
     TierIcon,
 } from './components';
-import {formatObservedAt, hasStaleMetrics, metricIssueReason} from './topology';
+import {formatObservedAt, hasStaleMetrics, markSourcesStale, metricIssueReason} from './topology';
 import {operationsReturnState} from './navigation';
-import {ReadinessStatus} from './Readiness';
+import {markNodeStale, ReadinessStatus} from './Readiness';
 import './operations.scss';
 
 const stopRowNavigation = event => event.stopPropagation();
@@ -159,6 +159,12 @@ const Nodes = () => {
             if ([401, 403].includes(requestError?.status)) {
                 setData({items: [], total: 0, observed_at: null, stale: false});
             }
+            else {
+                setData(snapshot => ({...snapshot, stale: true,
+                    items: snapshot.items.map(markNodeStale),
+                    diagnostic_nodes: snapshot.diagnostic_nodes?.map(markNodeStale),
+                    sources: markSourcesStale(snapshot.sources)}));
+            }
             setError(requestError);
         }
         finally {
@@ -260,7 +266,7 @@ const Nodes = () => {
             render: (value, record) => (
                 <span className='operations-node-status'>
                     <HealthStatus status={value} reason={metricIssueReason(record)}
-                        stale={hasStaleMetrics(record)} />
+                        stale={data.stale || hasStaleMetrics(record)} />
                     <ReadinessStatus readiness={record.readiness} />
                 </span>
             )},
@@ -322,15 +328,20 @@ const Nodes = () => {
                                     label: displayHealthStatus(value, t),
                                 }))}
                         />
-                        <Input
-                            allowClear
-                            prefix={<SearchOutlined />}
-                            value={searchValue}
-                            placeholder={t('operations.search_nodes')}
-                            aria-label={t('operations.search_nodes')}
-                            onPressEnter={search}
-                            onChange={changeSearch}
-                        />
+                        <Space.Compact>
+                            <Input
+                                allowClear
+                                prefix={<SearchOutlined />}
+                                value={searchValue}
+                                placeholder={t('operations.search_nodes')}
+                                aria-label={t('operations.search_nodes')}
+                                onPressEnter={search}
+                                onChange={changeSearch}
+                            />
+                            <Button aria-label={t('common.action.search')} onClick={search}>
+                                {t('common.action.search')}
+                            </Button>
+                        </Space.Compact>
                         {hasUserFilters && (
                             <Button onClick={clearFilters}>
                                 {t('operations.clear_filters')}

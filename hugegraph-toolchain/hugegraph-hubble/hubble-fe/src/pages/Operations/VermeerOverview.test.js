@@ -18,6 +18,7 @@
 import {render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {MemoryRouter, useLocation, useNavigate} from 'react-router-dom';
+import JSONbig from 'json-bigint';
 import Overview from './Overview';
 import {getOverview} from '../../api/operations';
 import {getDashboard} from '../../api/auth';
@@ -99,7 +100,11 @@ test('keeps Vermeer collapsed until opened, then uses Master and Worker tiers', 
 
 test('preserves the main view and query across service navigation and browser back', async () => {
     renderOverview('/operations/overview?view=nodes&source=attention');
-    await userEvent.click(await screen.findByRole('button', {name: 'View compute cluster'}));
+    const entry = await screen.findByRole('button', {name: 'View compute cluster'});
+    const compute = screen.getByRole('region', {name: 'Vermeer Compute Cluster'});
+    expect(within(compute).getByRole('button', {name: 'View compute cluster'})).toBe(entry);
+    expect(screen.getByRole('table', {name: 'Cluster nodes'})).not.toContainElement(entry);
+    await userEvent.click(entry);
     expect(screen.getByLabelText('Current URL')).toHaveTextContent(
         '/operations/overview?view=nodes&source=attention&service=vermeer'
     );
@@ -110,6 +115,15 @@ test('preserves the main view and query across service navigation and browser ba
     await userEvent.click(screen.getByRole('button', {name: 'History back'}));
     expect(await screen.findByRole('heading', {level: 2, name: 'Vermeer Compute Cluster'}))
         .toBeInTheDocument();
+});
+
+test('does not show a compute section when Vermeer is disabled', async () => {
+    const data = snapshot();
+    data.vermeer = {configured: false};
+    getOverview.mockResolvedValue(data);
+    renderOverview('/operations/overview?view=nodes');
+    await screen.findByRole('table', {name: 'Cluster nodes'});
+    expect(screen.queryByRole('region', {name: 'Vermeer Compute Cluster'})).not.toBeInTheDocument();
 });
 
 test('changing the compute view does not alter the main-cluster view on return', async () => {
@@ -397,6 +411,43 @@ test('resource summary counts only fresh process samples and states coverage per
     expect(vermeerResourceSummary(nodes, {...data.vermeer, stale: true})).toEqual({
         cpu: {value: null, collected: 0}, rss: {value: null, collected: 0}, total: 2,
     });
+});
+
+test('production json-bigint decimals count as fresh CPU samples without changing zero', async () => {
+    const data = snapshot(2);
+    const parsed = JSONbig.parse('{"cpu_cores":0.00044612345678912345,"rss_bytes":1288490188}');
+    expect(typeof parsed.cpu_cores).toBe('object');
+    data.vermeer.master = {...data.vermeer.master, metrics: {cpu_cores: 0, rss_bytes: 1024},
+        metric_status: {availability: 'AVAILABLE', fresh: true}};
+    data.vermeer.workers[0].metrics = parsed;
+    data.vermeer.workers[1].metrics = {cpu_cores: 0, rss_bytes: 2048};
+    const summary = vermeerResourceSummary([data.vermeer.master, ...data.vermeer.workers], data.vermeer);
+    expect(summary.cpu.collected).toBe(3);
+    expect(summary.cpu.value).toBeCloseTo(Number('0.00044612345678912345'));
+    getOverview.mockResolvedValue(data);
+    renderOverview('/operations/overview?service=vermeer&node=worker-1');
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Process CPU: 0.0004 cores')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Process CPU: Unavailable')).not.toBeInTheDocument();
+});
+
+test.each([null, '0.5', {}, -1, Infinity, NaN])('invalid CPU value %p is unavailable', value => {
+    const data = snapshot();
+    const node = {...data.vermeer.workers[0], metrics: {cpu_cores: value}};
+    expect(vermeerResourceSummary([node], data.vermeer).cpu).toEqual({value: null, collected: 0});
+});
+
+test('BigNumber metrics still obey availability, freshness and finite nonnegative bounds', () => {
+    const data = snapshot();
+    const big = JSONbig.parse('{"small":0.00044612345678912345,"negative":-0.00044612345678912345}');
+    const node = {...data.vermeer.workers[0], metrics: {cpu_cores: big.small},
+        metric_status: {availability: 'AVAILABLE', stale: true}};
+    expect(vermeerResourceSummary([node], data.vermeer).cpu).toEqual({value: null, collected: 0});
+    node.metric_status = {availability: 'UNAVAILABLE'};
+    expect(vermeerResourceSummary([node], data.vermeer).cpu).toEqual({value: null, collected: 0});
+    node.metric_status = {availability: 'AVAILABLE'};
+    node.metrics.cpu_cores = big.negative;
+    expect(vermeerResourceSummary([node], data.vermeer).cpu).toEqual({value: null, collected: 0});
 });
 
 test.each([

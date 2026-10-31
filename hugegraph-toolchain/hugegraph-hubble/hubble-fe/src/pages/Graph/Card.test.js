@@ -212,6 +212,25 @@ test('opens Schema from the graph preview and keeps Gremlin as the footer action
     );
 });
 
+test('summarizes a dense schema without shrinking its labels and opens the full schema', () => {
+    const vertices = ['person', 'city', 'company', 'project'].map(name => ({id: name, label: name}));
+    const edges = [
+        {id: 'lives', label: 'lives_in', source: 'person', target: 'city'},
+        {id: 'works', label: 'works_at', source: 'person', target: 'company'},
+        {id: 'owns', label: 'owns', source: 'company', target: 'project'},
+    ];
+    render(<MemoryRouter><GraphCard item={{name: 'g', graphspace: 'space',
+        schemaview: {vertices, edges}}} menus={[]} /><LocationProbe /></MemoryRouter>);
+
+    expect(screen.queryByTestId('preview-contract')).not.toBeInTheDocument();
+    expect(screen.getByText('graph.card.schema_summary_hint')).toBeInTheDocument();
+    for (const name of ['person', 'city', 'company', 'project', 'lives_in', 'works_at', 'owns']) {
+        expect(screen.getByText(name)).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole('button', {name: 'graph.card.view_schema:g'}));
+    expect(screen.getByTestId('location')).toHaveTextContent('/graphspace/space/graph/g/meta');
+});
+
 test.each(['Enter', ' '])(
     'opens Schema from the named graph preview with the %p key',
     key => {
@@ -386,6 +405,54 @@ test('a failed Vermeer snapshot retries the same source instead of collecting Se
     expect(api.manage.getGraphStatistic).not.toHaveBeenCalled();
     expect(await screen.findByRole('button', {name: /graph.card.vermeer_snapshot_label/}))
         .toHaveTextContent('30/60');
+});
+
+test('a specifically unloaded Vermeer snapshot gives visible scoped loading guidance', async () => {
+    api.analysis.getGraphData.mockResolvedValueOnce({status: 200, data: {vertexcount: null, edgecount: null}});
+    api.manage.getVermeerStatistic.mockResolvedValueOnce({status: 400,
+        message: 'Load this graph from OLAP graph compute before collecting Vermeer statistics'});
+    render(<MemoryRouter><GraphCard item={{name: 'my graph', graphspace: 'my space',
+        schemaview: {vertices: [], edges: []}}} menus={[]} canComputeStatistics /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', {name: 'graph.card.statistics_source'}));
+    fireEvent.click(await screen.findByText('graph.card.vermeer_statistics'));
+    expect(await screen.findByRole('status')).toHaveTextContent('graph.card.vermeer_load_first');
+    expect(screen.getByRole('link', {name: 'graph.card.open_graph_compute'}))
+        .toHaveAttribute('href', '/algorithms/my%20space/my%20graph?engine=olap');
+    expect(screen.getByRole('button', {name: 'graph.detail.retry_statistics'})).toBeEnabled();
+});
+
+test('an HTTP error for an unloaded snapshot clears guidance on a successful retry', async () => {
+    api.analysis.getGraphData.mockResolvedValueOnce({status: 200, data: {vertexcount: null, edgecount: null}});
+    api.manage.getVermeerStatistic.mockRejectedValueOnce({response: {status: 400, data: {status: 400,
+        message: 'Load this graph from OLAP graph compute before collecting Vermeer statistics'}}})
+        .mockResolvedValueOnce({status: 200, data: {vertexcount: 12, edgecount: 34}});
+    render(<MemoryRouter><GraphCard item={{name: 'g', graphspace: 'space',
+        schemaview: {vertices: [], edges: []}}} menus={[]} canComputeStatistics /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', {name: 'graph.card.statistics_source'}));
+    fireEvent.click(await screen.findByText('graph.card.vermeer_statistics'));
+    expect(await screen.findByRole('status')).toHaveTextContent('graph.card.vermeer_load_first');
+    fireEvent.click(screen.getByRole('button', {name: 'graph.detail.retry_statistics'}));
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(api.manage.getVermeerStatistic).toHaveBeenCalledTimes(2);
+});
+
+test.each([
+    {status: 403, message: 'Load this graph from OLAP graph compute before collecting Vermeer statistics'},
+    {status: 400, message: 'Vermeer workers are not ready'},
+    {status: 503, message: 'Load this graph from OLAP graph compute before collecting Vermeer statistics'},
+])('other Vermeer failures do not claim the snapshot is unloaded: %j', async response => {
+    api.analysis.getGraphData.mockResolvedValueOnce({status: 200, data: {vertexcount: null, edgecount: null}});
+    api.manage.getVermeerStatistic.mockResolvedValueOnce(response);
+    render(<MemoryRouter><GraphCard item={{name: 'g', graphspace: 'space',
+        schemaview: {vertices: [], edges: []}}} menus={[]} canComputeStatistics /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', {name: 'graph.card.statistics_source'}));
+    fireEvent.click(await screen.findByText('graph.card.vermeer_statistics'));
+    await screen.findByRole('button', {name: 'graph.detail.retry_statistics'});
+    expect(screen.queryByRole('link', {name: 'graph.card.open_graph_compute'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
 });
 
 test('a failed collection leaves a retryable action and keeps graph navigation available', async () => {
