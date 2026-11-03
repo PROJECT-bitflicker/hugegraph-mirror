@@ -56,7 +56,7 @@ public class HubbleOptions extends OptionHolder {
     }
 
     public static final ConfigOption<Boolean> TEXT2GQL_SHARED_ENABLED =
-            new ConfigOption<>("text2gql.shared.enabled", "Enable the deployment shared model.", false);
+            new ConfigOption<>("text2gql.shared.enabled", "Enable the deployment shared model.", true);
 
     public static final ConfigOption<String> TEXT2GQL_SHARED_CONNECTION_TYPE =
             new ConfigOption<>(
@@ -428,6 +428,13 @@ public class HubbleOptions extends OptionHolder {
             return false;
         }
     }
+
+    public static final ConfigOption<Boolean> OPERATIONS_PD_DIRECT_PEERS =
+            new ConfigOption<>(
+                    "operations.pd.direct_peers",
+                    "Set true only when each configured PD peer host routes directly to one PD member.",
+                    false
+            );
 
     public static final ConfigOption<String> OPERATIONS_PD_USERNAME =
             new ConfigOption<>(

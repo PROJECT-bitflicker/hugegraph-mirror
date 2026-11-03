@@ -30,7 +30,10 @@ import {
     SourceStrip,
     TierIcon,
 } from './components';
-import {formatMetricValue, formatObservedAt, markSourcesStale, selectAttentionSources} from './topology';
+import {
+    formatBytes as formatUnsignedBytes, formatMetricValue, formatObservedAt, ratioPercent,
+    markSourcesStale, selectAttentionSources,
+} from './topology';
 import {operationsReturnTo} from './navigation';
 import SourceDiagnostics from './SourceDiagnostics';
 import {ProcessLifecyclePanel, ReadinessPanel, markNodeStale} from './Readiness';
@@ -80,8 +83,8 @@ const formatBytes = value => {
         return null;
     }
     let unit = 0;
-    while (Math.abs(size) >= 1024 && unit < units.length - 1) {
-        size /= 1024;
+    while (Math.abs(size) >= 1000 && unit < units.length - 1) {
+        size /= 1000;
         unit += 1;
     }
     return `${new Intl.NumberFormat(undefined, {maximumFractionDigits: 1}).format(size)} `
@@ -98,15 +101,24 @@ const formatDuration = value => {
     return minutes > 0 ? `${minutes}m ${remainder}s` : `${remainder}s`;
 };
 
+const isBigMetric = value => value !== null && typeof value === 'object'
+        && typeof value.constructor?.isBigNumber === 'function'
+        && value.constructor.isBigNumber(value);
+
 const formatUnitValue = (value, unit) => {
-    const amount = Number(value);
     const normalized = String(unit ?? '').toUpperCase();
+    const big = isBigMetric(value);
+    const amount = Number(value);
     if (!Number.isFinite(amount)) {
         return null;
     }
-    if (normalized === 'MB' && Math.abs(amount) >= 1024) {
-        return `${new Intl.NumberFormat(undefined, {maximumFractionDigits: 1})
-            .format(amount / 1024)} GB`;
+    // The upstream integer has already been truncated to binary megabytes.
+    if (normalized === 'MB') {
+        if (!big && Number.isInteger(amount) && !Number.isSafeInteger(amount)) {
+            return null;
+        }
+        const bytes = big ? value.times(1048576) : amount * 1048576;
+        return formatUnsignedBytes(bytes);
     }
     return `${new Intl.NumberFormat(undefined, {maximumFractionDigits: 1}).format(amount)}`
         + `${normalized ? ` ${normalized}` : ''}`;
@@ -152,23 +164,46 @@ const formatDisplayValue = (key, value, parentKey, values, unavailable) => {
 };
 
 const capacitySummary = values => {
-    const total = Number(values?.capacity_bytes ?? values?.total_space);
-    const available = Number(values?.available_bytes ?? values?.usable_space);
-    if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(available)) {
+    let total = values?.capacity_bytes ?? values?.total_space;
+    let available = values?.available_bytes ?? values?.usable_space;
+    if (total === null || total === undefined || available === null || available === undefined) {
         return null;
     }
-    const used = Math.max(0, total - available);
+    if (isBigMetric(total) || isBigMetric(available)) {
+        const BigNumber = (isBigMetric(total) ? total : available).constructor;
+        if ((!isBigMetric(total) && !Number.isSafeInteger(Number(total))) ||
+            (!isBigMetric(available) && !Number.isSafeInteger(Number(available)))) {
+            return null;
+        }
+        total = isBigMetric(total) ? total : new BigNumber(String(total));
+        available = isBigMetric(available) ? available : new BigNumber(String(available));
+        if (!total.isFinite() || !available.isFinite() || total.comparedTo(0) <= 0 ||
+            available.comparedTo(0) < 0) {
+            return null;
+        }
+    } else {
+        total = Number(total);
+        available = Number(available);
+        if (!Number.isSafeInteger(total) || total <= 0 ||
+            !Number.isSafeInteger(available) || available < 0) {
+            return null;
+        }
+    }
+    let used = isBigMetric(total) ? total.minus(available) : total - available;
+    if (isBigMetric(used) ? used.comparedTo(0) < 0 : used < 0) {
+        used = 0;
+    }
     return {
         used,
         total,
-        percent: Math.round(used / total * 100),
+        percent: ratioPercent(used, total),
         unit: values?.capacity_bytes !== undefined ? 'B' : values?.size_unit,
     };
 };
 
 const formatCapacityValue = (value, unit) => {
     return String(unit).toUpperCase() === 'B'
-        ? formatBytes(value) : formatUnitValue(value, unit);
+        ? formatUnsignedBytes(value) : formatUnitValue(value, unit);
 };
 
 const MemoryUsage = ({label, values, unavailable, t}) => {
@@ -178,8 +213,8 @@ const MemoryUsage = ({label, values, unavailable, t}) => {
     const hasMaximum = Number.isFinite(maximum) && maximum > 0;
     const percent = hasUsed && hasMaximum
         ? Math.min(100, Math.max(0, Math.round(used / maximum * 100))) : 0;
-    const usedLabel = hasUsed ? formatUnitValue(used, 'MB') : unavailable;
-    const maximumLabel = hasMaximum ? formatUnitValue(maximum, 'MB') : unavailable;
+    const usedLabel = hasUsed ? (formatUnitValue(values.used, 'MB') ?? unavailable) : unavailable;
+    const maximumLabel = hasMaximum ? (formatUnitValue(values.max, 'MB') ?? unavailable) : unavailable;
 
     return (
         <div className='operations-memory-usage'>
@@ -200,7 +235,7 @@ const MemoryUsage = ({label, values, unavailable, t}) => {
             {Number.isFinite(Number(values?.committed)) && (
                 <div className='operations-memory-committed'>
                     {metricLabel('committed', t)}: {' '}
-                    {formatUnitValue(values.committed, 'MB')}
+                    {formatUnitValue(values.committed, 'MB') ?? unavailable}
                 </div>
             )}
         </div>
@@ -345,17 +380,22 @@ const MetricGroup = ({group, name, values, status = {}, emptyMessage}) => {
         !HIDDEN_METRIC_KEYS[group]?.has(key)
     );
     const availability = status.availability ?? 'UNSUPPORTED';
-    const emptyState = EMPTY_STATE_BY_AVAILABILITY[availability] ?? 'unavailable';
+    const notCollected = status.reason === 'metrics_not_collected';
+    const capacity = capacitySummary(values);
+    const hasEmptyBody = visibleEntries.length === 0 && !capacity;
+    const emptyState = notCollected ? 'reason_metrics_not_collected'
+        : EMPTY_STATE_BY_AVAILABILITY[availability] ?? 'unavailable';
     const showLastSuccess = status.last_success_at != null
         && (status.stale || status.observed_at == null);
     const displayedAt = showLastSuccess ? status.last_success_at : status.observed_at;
     const displayedTime = displayedAt == null ? null : formatObservedAt(
         displayedAt, i18n.language, t('operations.unavailable')
     );
-    const availabilityLabel = t(`operations.availability_${availability.toLowerCase()}`, {
+    const availabilityLabel = t(notCollected ? 'operations.metrics_not_collected'
+        : `operations.availability_${availability.toLowerCase()}`, {
         defaultValue: availability,
     });
-    const reasonLabel = status.reason ? t(`operations.reason_${status.reason}`, {
+    const reasonLabel = status.reason && !(notCollected && hasEmptyBody) ? t(`operations.reason_${status.reason}`, {
         defaultValue: status.reason.replaceAll('_', ' '),
     }) : null;
     const upgradeHelp = status.reason === 'unsupported_version'
@@ -400,8 +440,7 @@ const MetricGroup = ({group, name, values, status = {}, emptyMessage}) => {
             {statusDetails}
         </header>
     );
-    const capacity = capacitySummary(values);
-    if (visibleEntries.length === 0 && !capacity) {
+    if (hasEmptyBody) {
         return (
             <section className='operations-surface operations-metric-group'>
                 {metricHeader}

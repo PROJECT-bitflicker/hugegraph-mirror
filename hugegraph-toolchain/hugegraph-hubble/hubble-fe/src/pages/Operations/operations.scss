@@ -373,7 +373,9 @@
     }
 }
 
-.tier-server .operations-topology-node::before {
+.tier-server .operations-tier-branch::before,
+.tier-server .operations-topology-node::before,
+.tier-server .operations-topology-overflow::before {
     display: none;
 }
 
@@ -443,6 +445,12 @@
     > .anticon { color: var(--workbench-color-brand); font-size: 18px; }
     > span { color: var(--workbench-color-text-secondary); }
     > strong { text-align: right; }
+}
+
+.operations-stats-source {
+    color: var(--workbench-color-text-secondary);
+    font-size: 12px;
+    overflow-wrap: anywhere;
 }
 
 .operations-fact-list { display: flex; flex-direction: column; }

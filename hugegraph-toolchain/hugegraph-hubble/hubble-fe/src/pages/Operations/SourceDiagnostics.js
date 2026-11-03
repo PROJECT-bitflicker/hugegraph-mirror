@@ -52,7 +52,9 @@ const DiagnosticRequest = ({diagnostics = {}, owner}) => {
             responseBytes && {
                 key: 'size', label: t('operations.diagnostic_response_size'),
                 children: diagnostics.response_size_exact === false
-                    ? t('operations.diagnostic_size_at_least', {size: responseBytes}) : responseBytes,
+                    ? t('operations.diagnostic_size_at_least', {size:
+                        `${new Intl.NumberFormat(i18n.language).format(diagnostics.response_bytes)} B`})
+                    : responseBytes,
             },
             limit && {key: 'limit', label: t('operations.diagnostic_response_limit'), children: limit},
             failedGraphs !== null && {key: 'failed-graphs', label: t('operations.metric_labels.failed_graphs'),
@@ -182,7 +184,9 @@ const SourceDiagnostics = ({sources = {}, sourceName, nodes = [], focus = false,
                         ['UNAVAILABLE', 'MALFORMED'].includes(status.availability)
                             || status.stale && status.availability !== 'UNSUPPORTED'
                             || status.availability === 'UNSUPPORTED'
-                                && ['unsupported_version', 'pd_metrics_unmapped'].includes(status.reason)
+                                && (['unsupported_version', 'pd_metrics_unmapped'].includes(status.reason)
+                                    || source.diagnostics?.pd_peer_metrics
+                                        && status.reason === 'metrics_not_collected')
                                 && (source.availability === 'PARTIAL'
                                     || ['DOWN', 'DEGRADED'].includes(source.status))
                     )).map(([group, status]) => ({node, group, status}))

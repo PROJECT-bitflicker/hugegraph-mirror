@@ -336,6 +336,10 @@ configuration instead.
 For deployment-managed configuration, set these options in
 `conf/hugegraph-hubble.properties`:
 
+The default-model switch is enabled by default, but it is unavailable until a
+base URL, model and required credentials are configured. Set `enabled=false` to
+disable it; a saved administrator setting takes precedence over deployment defaults.
+
 ```properties
 text2gql.shared.enabled=true
 text2gql.shared.connection_type=openai
@@ -661,15 +665,35 @@ trusted Store scheme, hostname or literal address, and port; discovery cannot
 add origins to this allowlist. HTTPS origins keep their configured hostname for
 TLS SNI and certificate hostname verification.
 
+PD per-member metrics can be enabled with `operations.pd.direct_peers=true` only
+when each hostname in `pd.peers` routes directly to one PD member, not a Service,
+proxy, or load balancer. Hubble accepts discovered member REST addresses only when
+the host is one of those explicitly configured peers and the scheme, REST port and
+base path match `pd.server`. Credentials are sent only to these trusted origins.
+The setting defaults to false because the metrics response does not identify the
+responding member. The same trusted mapping probes `/v1/ready` for each member;
+older members returning 404 remain explicitly unsupported. Partial matches and
+probe failures are reported per node, with bounded concurrent probes and deadlines.
+
 ### Cluster source diagnostics
 
-PD member discovery uses the lightweight `/v1/members` endpoint for members,
-leader and cluster state. It does not call `/v1/cluster` or fall back to that
-endpoint when discovery fails, so discovering nodes does not scan every graph
-partition. Optional aggregate fields absent from the member response, including
-graph, partition and replica counts and data state, remain unavailable rather
-than zero. Store counts and capacity still come from the existing `/v1/stores`
-response; Hubble does not request the heavy summary to fill the remaining cards.
+PD member discovery uses `/v1/members` independently of aggregate statistics.
+The Overview also samples `/v1/cluster` asynchronously using the configured PD
+credentials. Each Hubble process shares one in-flight sample and retries at most
+once per 60 seconds, including after a failed request or manual refresh. A host
+clock step backwards can trigger an additional sample. DNS resolution, HTTP
+connect, read, whole-call and response-size limits also apply. A failed sample never blocks
+member discovery; the last successful values are labeled stale and retain their
+sampling time. The first sample is shown as collecting, rather than as zero.
+Each Hubble replica samples independently. The PD endpoint scans graph metadata
+and aggregates Store statistics, so operators should assess its cost for large
+deployments. Browser polling uses the normal overview cache with one bounded
+refresh fallback, so a longer custom overview TTL does not hide the first sample.
+
+The graph count includes graph names ending in `/g`; partition count is the
+number of shard groups; replicas is the configured target per group, not the
+actual total; and data size is approximate physical Store data including
+replicas. Store counts and capacity come from `/v1/stores`.
 
 Cluster Overview distinguishes node reachability from collection quality. A
 Store source with failed or partial collection shows an amber attention status,
@@ -712,7 +736,7 @@ health also considers `dataState` (`PState_Warn`, `PState_Offline`, and
 details. A data fault degrades the cluster view without marking the PD process
 down. Older responses without `dataState` retain their existing behavior.
 
-PD JVM metrics are attached to a node only when the configured PD URL matches
+By default, PD JVM metrics are attached to a node only when the configured PD URL matches
 its advertised origin and base path after normalizing scheme, hostname, and
 default port. A scheme-less advertised `host:port` uses the configured protocol.
 Existing node IDs remain unchanged; DNS aliases and ambiguous
@@ -726,8 +750,7 @@ stale states. Store target discovery prefers
 `/v1/prom/targets-all`. Authentication, timeout, malformed-response, and server
 errors remain visible rather than triggering broad discovery.
 
-These checks do not probe PD `/v1/ready` or Store `/-/state`. Registration and
-metrics availability do not prove read/write readiness. Regression tests use
+Registration and metrics availability do not prove read/write readiness. Regression tests use
 mocked clients and local HTTP fixtures; production readiness and cross-version
 live deployment coverage remain separate validation work.
 

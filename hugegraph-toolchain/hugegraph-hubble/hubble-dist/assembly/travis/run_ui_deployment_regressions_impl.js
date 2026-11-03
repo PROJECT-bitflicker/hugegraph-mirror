@@ -687,11 +687,11 @@ async function main() {
             await page.getByRole('button', { name: '提交任务', exact: true }).click();
             await page.getByRole('button', { name: '查看任务进度', exact: true }).click();
             await page.waitForURL('**/asyncTasks/soc_graph/hugegraph?taskId=80001&submitted=1');
-            await page.getByText('任务 80001 已提交，正在同步状态', { exact: true }).waitFor();
+            await page.getByText('任务 Server #80001 已提交，正在同步状态', { exact: true }).waitFor();
             await page.getByText(/服务端已接受任务，正在每秒查询任务状态/).waitFor();
-            assert.equal(await page.getByText('80001', { exact: true }).count(), 0);
+            assert.equal(await page.getByText('Server #80001', { exact: true }).count(), 0);
             await screenshot(page, 'async-task-submitted');
-            await page.getByText('80001', { exact: true }).waitFor();
+            await page.getByText('Server #80001', { exact: true }).waitFor();
             assert(state.taskLookups >= 3, `Expected delayed exact-ID polling, got ${state.taskLookups} lookups`);
             await page.getByText('查看原因', { exact: true }).click();
             await page.getByText('任务执行失败', { exact: true }).waitFor();
@@ -831,13 +831,24 @@ async function main() {
                 assert.equal(await page.locator('.operations-vermeer-node').count(), 2);
                 assert.equal(await page.getByText('已采集 2 / 2 个节点', {exact: true}).count(), 2);
                 assert.deepEqual(await page.locator('.operations-vermeer-resource-fact strong').allTextContents(),
-                    ['0.54 核', '2.4 GiB']);
+                    ['0.54 核', '2.6 GB']);
                 await assertNoHorizontalOverflow(page);
                 await screenshot(page, `operations-mobile-compute-${width}`);
                 await page.getByRole('button', {name: '返回主集群', exact: true}).click();
                 await topology.waitFor();
                 assert.equal(new URL(page.url()).searchParams.get('service'), null);
             }
+            // More than three Servers renders an overflow marker; its stem must
+            // not dangle after the Server-layer branch was removed.
+            const server = state.operationsOverview.nodes.find(node => node.type === 'SERVER');
+            state.operationsOverview.nodes.push(...[3, 4].map(index => ({...server,
+                id: `server-mobile-${index}`, name: `Server overflow ${index}`})));
+            await page.setViewportSize({width: 1440, height: 1000});
+            await page.goto(base + '/operations/overview');
+            const serverOverflow = page.locator('.tier-server .operations-topology-overflow');
+            await serverOverflow.waitFor({state: 'visible'});
+            assert.equal(await serverOverflow.evaluate(element =>
+                getComputedStyle(element, '::before').display), 'none');
             state.operationsOverview = null;
             state.extraCapabilities = [];
             await page.setViewportSize({width: 1440, height: 1000});
