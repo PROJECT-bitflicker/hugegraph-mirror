@@ -81,6 +81,35 @@ type community struct {
 	sigmaTot float64
 }
 
+func validatePositiveFinite(name string, value float64) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
+		return fmt.Errorf("%s must be finite and greater than 0, got %v", name, value)
+	}
+	return nil
+}
+
+func validateNonNegativeFinite(name string, value float64) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return fmt.Errorf("%s must be finite and non-negative, got %v", name, value)
+	}
+	return nil
+}
+
+func validatePositiveInt(name string, value int) error {
+	if value <= 0 {
+		return fmt.Errorf("%s must be greater than 0, got %d", name, value)
+	}
+	return nil
+}
+
+func identityCommunityIDs(total uint32) []serialize.SUint32 {
+	ids := make([]serialize.SUint32, total)
+	for i := range ids {
+		ids[i] = serialize.SUint32(i)
+	}
+	return ids
+}
+
 type LouvainWorker struct {
 	compute.WorkerComputerBase
 	//nodeID
@@ -111,6 +140,7 @@ type LouvainWorker struct {
 	firstStep       bool
 	firstStepKI     []float64
 	firstStepCommID []serialize.SUint32
+	outputReady     int32
 }
 
 func (lw *LouvainWorker) VertexValue(i uint32) serialize.MarshalAble {
@@ -126,8 +156,8 @@ func (lw *LouvainWorker) VertexValue(i uint32) serialize.MarshalAble {
 
 // ValidateOutput rejects early termination before community IDs are available.
 func (lw *LouvainWorker) ValidateOutput() error {
-	if lw.firstStep {
-		return fmt.Errorf("louvain did not finish its first pass; increase compute.max_step")
+	if atomic.LoadInt32(&lw.outputReady) == 0 {
+		return fmt.Errorf("louvain did not finish publishing community IDs; increase compute.max_step")
 	}
 	return nil
 }
@@ -138,6 +168,9 @@ func (lw *LouvainWorker) Init() error {
 	lw.neighborEdges = make([]serialize.SliceUint32, lw.WContext.GraphData.Vertex.TotalVertexCount())
 
 	lw.resolution = options.GetFloat(lw.WContext.Params, "louvain.resolution")
+	if err := validatePositiveFinite("louvain.resolution", lw.resolution); err != nil {
+		return err
+	}
 	lw.parallel = lw.WContext.Parallel
 	if lw.parallel <= 0 {
 		logrus.Infof("parallel value must be larger than 0, get: %v, set to defalut value :1", lw.parallel)
@@ -160,6 +193,7 @@ func (lw *LouvainWorker) Init() error {
 
 	lw.emptyComm = serialize.SUint32(lw.WContext.GraphData.Vertex.TotalVertexCount() + 1)
 	lw.firstStep = true
+	atomic.StoreInt32(&lw.outputReady, 0)
 	return nil
 }
 
@@ -176,6 +210,18 @@ func (lw *LouvainWorker) BeforeStep() {
 			lw.communities[serialize.SUint32(vertexID)].sigmaTot = float64(len(edges))
 			lw.firstStepKI[vertexID] = float64(len(edges))
 			lw.firstStepCommID[vertexID] = serialize.SUint32(vertexID)
+		}
+		if lw.edgeNums == 0 {
+			lw.nodeID = identityCommunityIDs(lw.WContext.GraphData.Vertex.TotalVertexCount())
+			lw.nodes = make(map[serialize.SUint32]*louvainNode)
+			lw.communities = make(map[serialize.SUint32]*community)
+			lw.firstStep = false
+			lw.firstStepKI = nil
+			lw.firstStepCommID = nil
+			lw.neighborEdges = nil
+			lw.WContext.SetValue("mod_value", serialize.SFloat32(0))
+			atomic.StoreInt32(&lw.outputReady, 1)
+			return
 		}
 		lw.resolution /= lw.edgeNums
 		lw.WContext.SetValue("mod_value", serialize.SFloat32(-1))
@@ -261,11 +307,12 @@ func (lw *LouvainWorker) BeforeStep() {
 		}
 		update := lw.WContext.GetValue("update").(serialize.SInt32)
 		if update > 0 {
+			atomic.StoreInt32(&lw.outputReady, 0)
 			lw.deleteEmptyComm()
 			if lw.firstStep {
-				lw.firstStep = false
 				//初始化node
 				lw.initLouvainNode()
+				lw.firstStep = false
 				//free memory
 				lw.firstStepCommID = nil
 				lw.firstStepKI = nil
@@ -274,6 +321,7 @@ func (lw *LouvainWorker) BeforeStep() {
 				//生成新图
 				lw.genNewGraph()
 			}
+			atomic.StoreInt32(&lw.outputReady, 1)
 			lw.WContext.SetValue("mod_value", serialize.SFloat32(lw.calModularity()))
 		} else {
 			lw.optimizeMem(currCommIDs)
@@ -531,10 +579,7 @@ func (lw *LouvainWorker) initLouvainNode() {
 	//gen a new graph for new step
 	//可以并行
 	lw.nodes = make(map[serialize.SUint32]*louvainNode, len(lw.communities))
-	lw.nodeID = make([]serialize.SUint32, lw.WContext.GraphData.Vertex.TotalVertexCount())
-	for i := range lw.nodeID {
-		lw.nodeID[i] = serialize.SUint32(i)
-	}
+	lw.nodeID = identityCommunityIDs(lw.WContext.GraphData.Vertex.TotalVertexCount())
 	locker := &sync.Mutex{}
 	commIDs := make([]serialize.SUint32, 0, len(lw.communities))
 	for commID := range lw.communities {
@@ -663,7 +708,13 @@ type LouvainMaster struct {
 
 func (lm *LouvainMaster) Init() error {
 	lm.threshold = options.GetFloat(lm.MContext.Params, "louvain.threshold")
+	if err := validateNonNegativeFinite("louvain.threshold", lm.threshold); err != nil {
+		return err
+	}
 	lm.maxStep = options.GetInt(lm.MContext.Params, "louvain.step")
+	if err := validatePositiveInt("louvain.step", lm.maxStep); err != nil {
+		return err
+	}
 	lm.prevModValue = math.MinInt32
 	lm.louvainStep = 1
 	return nil
