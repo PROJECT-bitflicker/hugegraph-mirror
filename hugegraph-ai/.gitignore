@@ -218,3 +218,15 @@ cython_debug/
 *.out
 *.zip
 *.tar.gz
+
+# Ontogeny runtime state
+.ontogeny-*/
+admin-bootstrap-password
+/ontogeny/.docs/
+.ruff_cache/
+node_modules/
+/ontogeny/web/dist/
+/ontogeny/web/.e2e-port
+/ontogeny/**/*.db
+/ontogeny/**/*.pid
+.DS_Store

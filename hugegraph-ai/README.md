@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202-0E78BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-blue)](https://deepwiki.com/apache/hugegraph-ai)
 
-HugeGraph AI is the Python toolkit for building AI and data applications on [Apache HugeGraph](https://github.com/apache/hugegraph). It includes GraphRAG and knowledge-graph workflows, reusable extraction APIs, an MCP server, Python clients and graph machine-learning modules.
+HugeGraph AI is the Python toolkit for building AI and data applications on [Apache HugeGraph](https://github.com/apache/hugegraph). It includes the Ontogeny operational ontology platform, GraphRAG and knowledge-graph workflows, reusable extraction APIs, an MCP server, Python clients and graph machine-learning modules.
 
 **Start here:** [Choose a module](#choose-a-module) · [Quick start](#quick-start) · [Documentation](#documentation) · [Development](#development)
 
@@ -11,6 +11,7 @@ HugeGraph AI is the Python toolkit for building AI and data applications on [Apa
 
 | Goal | Module |
 |---|---|
+| Model operational data and run governed actions | [`ontogeny`](ontogeny/README.md) |
 | Build a GraphRAG or knowledge-graph application | [`hugegraph-llm`](hugegraph-llm/) |
 | Embed schema design and reviewed graph extraction in another Python project | [`hugegraph-llm-sdk`](hugegraph-llm-sdk/) |
 | Connect an MCP client to HugeGraph tools | [`hugegraph-mcp`](hugegraph-mcp/) |
@@ -76,6 +77,10 @@ docker compose -f docker-compose-network.yml up -d
 Each module README owns its package name, optional extras, API examples and compatibility boundary. Keeping those details beside the package avoids stale copies in this root README.
 
 ## Modules
+
+### `ontogeny`
+
+Ontogeny models objects, relationships, actions and policies in Git-managed YAML and exposes them through a governed API and collaborative console. It installs independently on Python 3.12 or later. See the [Ontogeny module guide](ontogeny/README.md) for the demo, architecture and setup.
 
 ### `hugegraph-llm-sdk`
 
